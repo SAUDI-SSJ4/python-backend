@@ -69,6 +69,7 @@ app.include_router(students.router, prefix=f"{settings.API_V1_STR}/students", ta
 
 @app.get("/")
 def root():
+    return RedirectResponse(url="/docs")
     """Root endpoint with API information."""
     return {
         "message": f"Welcome to {settings.PROJECT_NAME}",
