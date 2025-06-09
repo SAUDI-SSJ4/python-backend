@@ -44,7 +44,7 @@ class CategoryInDB(CategoryBase):
     updated_at: Optional[datetime] = None
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 # Course schemas
@@ -104,7 +104,7 @@ class CourseInDB(CourseBase):
     published_at: Optional[datetime] = None
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 # Chapter schemas
@@ -133,7 +133,7 @@ class ChapterInDB(ChapterBase):
     updated_at: Optional[datetime] = None
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 # Lesson schemas
@@ -166,7 +166,7 @@ class LessonInDB(LessonBase):
     updated_at: Optional[datetime] = None
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 # Video schemas
@@ -204,4 +204,4 @@ class VideoInDB(VideoBase):
     updated_at: Optional[datetime] = None
     
     class Config:
-        orm_mode = True 
+        from_attributes = True 
