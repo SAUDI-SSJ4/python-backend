@@ -51,4 +51,4 @@ class AffiliateLink(Base):
 
     # Relationships
     academy = relationship("Academy")
-    affiliate = relationship("Student") 
+    affiliate = relationship("Student")

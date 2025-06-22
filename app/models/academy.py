@@ -1,53 +1,65 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, Float, Enum as SQLEnum
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, Float, Enum as SQLEnum, Date
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
+from enum import Enum
 from app.db.base import Base
-import enum
+from app.models.role import Role
 
 
-class AcademyStatus(str, enum.Enum):
+class AcademyStatus(str, Enum):
     ACTIVE = "active"
-    INACTIVE = "inactive"
-    SUSPENDED = "suspended"
+    INACTIVE = "unactive"
+    DRAFT = "draft"
+
+
+class TrialStatus(str, Enum):
+    AVAILABLE = "available"
+    ACTIVE = "active"
+    EXPIRED = "expired"
+    USED = "used"
+    NOT_ELIGIBLE = "not_eligible"
+
+
+class AcademyUserRole(str, Enum):
+    OWNER = "owner"
+    ADMIN = "admin"
+    TRAINER = "trainer"
+    STAFF = "staff"
 
 
 class Academy(Base):
     __tablename__ = "academies"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(255), nullable=False)
-    slug = Column(String(255), unique=True, index=True)
-    user_name = Column(String(255), unique=True, index=True)
-    email = Column(String(255), unique=True, index=True, nullable=False)
+    academy_id = Column(String(255), unique=True, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    license = Column(String(255), nullable=True)
+    name = Column(String(200), nullable=False)
+    about = Column(Text, nullable=True)
+    image = Column(String(255), nullable=True)
+    email = Column(String(100), nullable=True)
     phone = Column(String(20), nullable=True)
-    phone2 = Column(String(20), nullable=True)
-    address = Column(Text, nullable=True)
-    country = Column(String(100), nullable=True)
-    city = Column(String(100), nullable=True)
-    postal_code = Column(String(20), nullable=True)
-    description = Column(Text, nullable=True)
-    logo = Column(String(255), nullable=True)
-    cover = Column(String(255), nullable=True)
-    status = Column(SQLEnum(AcademyStatus), default=AcademyStatus.ACTIVE)
-    verified = Column(Boolean, default=False)
-    featured = Column(Boolean, default=False)
-    package_id = Column(Integer, ForeignKey("packages.id"), nullable=True)
+    address = Column(String(255), nullable=True)
+    facebook = Column(String(255), nullable=True)
+    twitter = Column(String(255), nullable=True)
+    instagram = Column(String(255), nullable=True)
+    snapchat = Column(String(255), nullable=True)
+    status = Column(SQLEnum(AcademyStatus), default="active", index=True)
+    trial_status = Column(SQLEnum(TrialStatus), default=TrialStatus.AVAILABLE, index=True)
+    trial_start = Column(Date, nullable=True)
+    trial_end = Column(Date, nullable=True)
+    users_count = Column(Integer, default=0)
+    courses_count = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    package_id = Column(Integer, nullable=True)
+    slug = Column(String(155), unique=True, index=True, nullable=True)
 
-    # Relationships
-    package = relationship("Package", back_populates="academies")
-    users = relationship("AcademyUser", back_populates="academy")
-    courses = relationship("Course", back_populates="academy")
-    trainers = relationship("Trainer", back_populates="academy")
-    wallet = relationship("AcademyWallet", back_populates="academy", uselist=False)
-    finance = relationship("AcademyFinance", back_populates="academy", uselist=False)
-    subscriptions = relationship("Subscription", back_populates="academy")
+    # العلاقات الأساسية فقط - بدون النماذج غير الموجودة
+    user = relationship("User", back_populates="academy_profile")
+    academy_users = relationship("AcademyUser", back_populates="academy")
+    finance = relationship("AcademyFinance", uselist=False, back_populates="academy")
     coupons = relationship("Coupon", back_populates="academy")
-    blogs = relationship("Blog", back_populates="academy")
-    blog_posts = relationship("BlogPost", back_populates="academy")
-    templates = relationship("Template", back_populates="academy")
-    digital_products = relationship("DigitalProduct", back_populates="academy")
 
 
 class AcademyUser(Base):
@@ -55,19 +67,15 @@ class AcademyUser(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     academy_id = Column(Integer, ForeignKey("academies.id"), nullable=False)
-    name = Column(String(255), nullable=False)
-    email = Column(String(255), unique=True, index=True, nullable=False)
-    phone = Column(String(20), unique=True, nullable=True)
-    hashed_password = Column(String(255), nullable=False)
-    profile_image = Column(String(255), nullable=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_role = Column(SQLEnum(AcademyUserRole), default="staff", index=True)
     role_id = Column(Integer, ForeignKey("roles.id"), nullable=True)
-    is_active = Column(Boolean, default=True)
-    is_owner = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     # Relationships
-    academy = relationship("Academy", back_populates="users")
+    academy = relationship("Academy", back_populates="academy_users")
+    user = relationship("User", back_populates="academy_memberships")
     role = relationship("Role", back_populates="academy_users")
 
 
@@ -87,7 +95,6 @@ class Trainer(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     # Relationships
-    academy = relationship("Academy", back_populates="trainers")
     courses = relationship("Course", back_populates="trainer")
 
 
@@ -96,7 +103,7 @@ class Subscription(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     academy_id = Column(Integer, ForeignKey("academies.id"), nullable=False)
-    package_id = Column(Integer, ForeignKey("packages.id"), nullable=False)
+    package_id = Column(Integer, ForeignKey("packages.id"), nullable=True)
     start_date = Column(DateTime(timezone=True), nullable=False)
     end_date = Column(DateTime(timezone=True), nullable=False)
     is_active = Column(Boolean, default=True)
@@ -105,9 +112,8 @@ class Subscription(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     # Relationships
-    academy = relationship("Academy", back_populates="subscriptions")
-    package = relationship("Package", back_populates="subscriptions")
-    payment = relationship("Payment", back_populates="subscription")
+    academy = relationship("Academy")
+    payment = relationship("Payment", foreign_keys=[payment_id])
 
 
 class AcademyWallet(Base):
@@ -121,5 +127,4 @@ class AcademyWallet(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
-    # Relationships
-    academy = relationship("Academy", back_populates="wallet") 
+    # Relationships (تم إزالة العلاقة لتجنب المشاكل) 

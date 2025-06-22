@@ -69,7 +69,7 @@ class Course(Base):
     published_at = Column(DateTime(timezone=True), nullable=True)
 
     # Relationships
-    academy = relationship("Academy", back_populates="courses")
+    academy = relationship("Academy")
     category = relationship("Category", back_populates="courses")
     trainer = relationship("Trainer", back_populates="courses")
     chapters = relationship("Chapter", back_populates="course", order_by="Chapter.order")
@@ -237,3 +237,60 @@ class InteractiveTool(Base):
 
     # Relationships
     lesson = relationship("Lesson", back_populates="interactive_tools") 
+
+
+class StudentCourse(Base):
+    __tablename__ = "student_courses"
+
+    id = Column(Integer, primary_key=True, index=True)
+    student_id = Column(Integer, ForeignKey("students.id"), nullable=False)
+    course_id = Column(Integer, ForeignKey("courses.id"), nullable=False)
+    academy_id = Column(Integer, ForeignKey("academies.id"), nullable=False)
+    payment_id = Column(Integer, ForeignKey("payments.id"), nullable=True)
+    status = Column(String(20), default="active")  # active, expired, suspended
+    started_at = Column(DateTime(timezone=True), server_default=func.now())
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    completion_percentage = Column(Float, default=0.0)
+    price_paid = Column(Float, default=0.0)
+    last_accessed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationships
+    student = relationship("Student", back_populates="student_courses")
+    course = relationship("Course", back_populates="student_courses")
+    academy = relationship("Academy")
+    payment = relationship("Payment")
+
+
+class StudentLessonProgress(Base):
+    __tablename__ = "lesson_progress"
+
+    id = Column(Integer, primary_key=True, index=True)
+    student_id = Column(Integer, ForeignKey("students.id"), nullable=False)
+    lesson_id = Column(Integer, ForeignKey("lessons.id"), nullable=False)
+    course_id = Column(Integer, ForeignKey("courses.id"), nullable=False)
+    progress_percentage = Column(Integer, default=0)
+    completed = Column(Boolean, default=False)
+    current_position_seconds = Column(Integer, default=0)
+    last_watched_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationships
+    student = relationship("Student", back_populates="lesson_progress")
+    lesson = relationship("Lesson", back_populates="student_progress")
+    course = relationship("Course")
+
+
+class Favourite(Base):
+    __tablename__ = "favourites"
+
+    id = Column(Integer, primary_key=True, index=True)
+    student_id = Column(Integer, ForeignKey("students.id"), nullable=False)
+    course_id = Column(Integer, ForeignKey("courses.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    student = relationship("Student", back_populates="favourites")
+    course = relationship("Course", back_populates="favourites") 

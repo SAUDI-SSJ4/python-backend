@@ -27,8 +27,8 @@ class RegisterBase(BaseModel):
             raise ValueError('Passwords do not match')
         return v
 
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "name": "John Doe",
                 "email": "john@example.com",
@@ -37,17 +37,19 @@ class RegisterBase(BaseModel):
                 "password_confirm": "password123"
             }
         }
+    }
 
 
 # Admin schemas
 class AdminLogin(LoginBase):
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "email": "admin@example.com",
                 "password": "admin123"
             }
         }
+    }
 
 
 class AdminRegister(RegisterBase):
@@ -56,13 +58,14 @@ class AdminRegister(RegisterBase):
 
 # Academy schemas  
 class AcademyLogin(LoginBase):
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "email": "academy@example.com",
                 "password": "academy123"
             }
         }
+    }
 
 
 class AcademyRegister(BaseModel):
@@ -90,8 +93,8 @@ class AcademyRegister(BaseModel):
             raise ValueError('Passwords do not match')
         return v
 
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "academy_name": "Tech Academy",
                 "slug": "tech-academy",
@@ -107,27 +110,30 @@ class AcademyRegister(BaseModel):
                 "description": "A leading technology academy"
             }
         }
+    }
 
 
 # Student schemas
 class StudentLogin(LoginBase):
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "email": "student@example.com",
                 "password": "student123"
             }
         }
+    }
 
 
 class StudentPhoneLogin(PhoneLoginBase):
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "phone": "1234567890",
                 "password": "student123"
             }
         }
+    }
 
 
 class StudentRegister(RegisterBase):
@@ -136,8 +142,8 @@ class StudentRegister(RegisterBase):
     country: Optional[str] = Field(None, description="Country")
     city: Optional[str] = Field(None, description="City")
 
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "name": "Ahmed Ali",
                 "email": "ahmed@example.com",
@@ -150,83 +156,260 @@ class StudentRegister(RegisterBase):
                 "city": "Riyadh"
             }
         }
+    }
+
+
+# Unified authentication schemas
+class UnifiedLogin(BaseModel):
+    """Unified login schema for both students and academies"""
+    email: Optional[EmailStr] = Field(None, description="User email address")
+    phone: Optional[str] = Field(None, pattern="^[0-9]{10,15}$", description="Phone number")
+    password: str = Field(..., min_length=6, description="Password")
+    user_type: str = Field(..., pattern="^(student|academy)$", description="User type")
+    
+    @validator('email')
+    def validate_email_or_phone(cls, v, values):
+        if not v and not values.get('phone'):
+            raise ValueError('Either email or phone is required')
+        return v
+    
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "email": "user@example.com",
+                "password": "password123",
+                "user_type": "student"
+            }
+        }
+    }
+
+
+class UnifiedRegister(BaseModel):
+    """Unified registration schema for both students and academies"""
+    fname: str = Field(..., min_length=2, max_length=255, description="First name")
+    mname: Optional[str] = Field(None, max_length=255, description="Middle name")
+    lname: str = Field(..., min_length=2, max_length=255, description="Last name")
+    email: EmailStr = Field(..., description="Email address")
+    phone_number: str = Field(..., pattern="^[0-9]{10,15}$", description="Phone number")
+    password: str = Field(..., min_length=6, description="Password")
+    password_confirm: str = Field(..., min_length=6, description="Confirm password")
+    user_type: str = Field(..., pattern="^(student|academy)$", description="User type")
+    
+    # Student specific fields
+    birth_date: Optional[datetime] = Field(None, description="Birth date (students only)")
+    gender: Optional[str] = Field(None, pattern="^(male|female|other)$", description="Gender (students only)")
+    
+    # Academy specific fields
+    academy_name: Optional[str] = Field(None, min_length=2, max_length=200, description="Academy name (academies only)")
+    academy_about: Optional[str] = Field(None, description="Academy description")
+    
+    # Optional fields
+    refere_id: Optional[int] = Field(None, description="Referrer user ID")
+    picture: Optional[str] = Field(None, description="Profile picture URL (for Google auth)")
+    
+    @validator('password_confirm')
+    def passwords_match(cls, v, values, **kwargs):
+        if 'password' in values and v != values['password']:
+            raise ValueError('Passwords do not match')
+        return v
+    
+    @validator('academy_name')
+    def validate_academy_fields(cls, v, values):
+        if values.get('user_type') == 'academy' and not v:
+            raise ValueError('Academy name is required for academy registration')
+        return v
+    
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "fname": "أحمد",
+                "lname": "علي",
+                "email": "ahmed@example.com",
+                "phone_number": "1234567890",
+                "password": "password123",
+                "password_confirm": "password123",
+                "user_type": "student",
+                "birth_date": "1995-01-01T00:00:00Z",
+                "gender": "male"
+            }
+        }
+    }
+
+
+# Google authentication schemas
+class GoogleLoginRequest(BaseModel):
+    """Google login request - simplified"""
+    google_token: str = Field(..., description="Google ID token من Frontend")
+    
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "google_token": "eyJhbGciOiJSUzI1NiIsImtpZCI6IjBkOGE2NzM5OWU3ODgyYWNhZTdkN2Y2OGIyMjgwMjU2YTc5NmE1ODIiLCJ0eXAiOiJKV1QifQ..."
+            }
+        }
+    }
+
+
+class GoogleRegisterRequest(BaseModel):
+    """Google registration request - simplified"""
+    google_token: str = Field(..., description="Google ID token من Frontend")
+    user_type: str = Field(..., pattern="^(student|academy)$", description="نوع المستخدم")
+    
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "google_token": "eyJhbGciOiJSUzI1NiIsImtpZCI6IjBkOGE2NzM5OWU3ODgyYWNhZTdkN2Y2OGIyMjgwMjU2YTc5NmE1ODIiLCJ0eXAiOiJKV1QifQ...",
+                "user_type": "student"
+            }
+        }
+    }
+
+
+# Legacy Google Auth schema - لأغراض التوافق مع الكود الموجود
+class GoogleAuthRequest(BaseModel):
+    """Google authentication request schema - Legacy"""
+    # Google tokens (preferred method)
+    id_token: Optional[str] = Field(None, description="Google ID token from client")
+    
+    # Manual data (fallback when tokens are not available)
+    email: Optional[EmailStr] = Field(None, description="Google email")
+    name: Optional[str] = Field(None, description="Google name") 
+    picture: Optional[str] = Field(None, description="Google profile picture")
+    google_id: Optional[str] = Field(None, description="Google ID")
+    
+    user_type: str = Field(..., pattern="^(student|academy)$", description="User type")
+    
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "id_token": "eyJhbGciOiJSUzI1NiIsImtpZCI6IjBkOGE2NzM5OWU3ODgyYWNhZTdkN2Y2OGIyMjgwMjU2YTc5NmE1ODIiLCJ0eXAiOiJKV1QifQ...",
+                "user_type": "student"
+            }
+        }
+    }
 
 
 # OTP schemas
 class OTPRequest(BaseModel):
-    phone: str = Field(..., pattern="^[0-9]{10,15}$", description="Phone number to send OTP to")
+    """OTP request schema"""
+    email: Optional[EmailStr] = Field(None, description="Email address")
+    phone: Optional[str] = Field(None, pattern="^[0-9]{10,15}$", description="Phone number")
+    purpose: str = Field(..., pattern="^(login|password_reset|email_verification|transaction_confirmation)$", description="OTP purpose")
+    
+    @validator('email')
+    def validate_email_or_phone(cls, v, values):
+        if not v and not values.get('phone'):
+            raise ValueError('Either email or phone is required')
+        return v
 
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
-                "phone": "1234567890"
+                "email": "user@example.com",
+                "purpose": "email_verification"
             }
         }
+    }
 
 
 class OTPVerify(BaseModel):
-    phone: str = Field(..., pattern="^[0-9]{10,15}$", description="Phone number")
-    otp: str = Field(..., min_length=4, max_length=6, description="6-digit OTP code")
+    """OTP verification schema"""
+    email: Optional[EmailStr] = Field(None, description="Email address")
+    phone: Optional[str] = Field(None, pattern="^[0-9]{10,15}$", description="Phone number")
+    otp: str = Field(..., min_length=4, max_length=6, description="OTP code")
+    purpose: str = Field(..., pattern="^(login|password_reset|email_verification|transaction_confirmation)$", description="OTP purpose")
+    
+    @validator('email')
+    def validate_email_or_phone(cls, v, values):
+        if not v and not values.get('phone'):
+            raise ValueError('Either email or phone is required')
+        return v
 
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
-                "phone": "1234567890",
-                "otp": "123456"
+                "email": "user@example.com",
+                "otp": "123456",
+                "purpose": "email_verification"
             }
         }
+    }
 
 
 # Token schemas
 class Token(BaseModel):
+    """Authentication token response"""
     access_token: str = Field(..., description="JWT access token")
     refresh_token: str = Field(..., description="JWT refresh token")
     token_type: str = Field(default="bearer", description="Token type")
-    user_type: Optional[str] = Field(None, description="User type (student/academy/admin)")
+    user_type: str = Field(..., description="User type")
+    status: str = Field(default="success", description="Response status")
+    status_code: Optional[int] = Field(default=200, description="HTTP status code")
+    timestamp: Optional[str] = Field(default=None, description="Response timestamp")
+    user_data: Dict[str, Any] = Field(..., description="User information")
 
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
-                "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-                "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
+                "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
                 "token_type": "bearer",
-                "user_type": "student"
+                "user_type": "student",
+                "status": "success",
+                "user_data": {
+                    "id": 123,
+                    "email": "user@example.com",
+                    "fname": "أحمد",
+                    "lname": "محمد",
+                    "user_type": "student",
+                    "account_type": "local",
+                    "verified": True,
+                    "status": "active"
+                }
             }
         }
+    }
 
 
 class TokenRefresh(BaseModel):
+    """Token refresh schema"""
     refresh_token: str = Field(..., description="Valid refresh token")
 
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
             }
         }
+    }
 
 
 class TokenData(BaseModel):
+    """Token data schema"""
     user_id: Optional[int] = None
     user_type: Optional[str] = None
+    email: Optional[str] = None
 
 
 # Password reset schemas
 class PasswordResetRequest(BaseModel):
-    email: EmailStr = Field(..., description="Email address to send reset link to")
+    """Password reset request schema"""
+    email: EmailStr = Field(..., description="Email address")
 
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "email": "user@example.com"
             }
         }
+    }
 
 
 class PasswordReset(BaseModel):
-    token: str = Field(..., description="Password reset token from email")
-    new_password: str = Field(..., min_length=6, description="New password (minimum 6 characters)")
-    confirm_password: str = Field(..., min_length=6, description="Confirm new password")
+    """Password reset schema"""
+    token: str = Field(..., description="Reset token")
+    new_password: str = Field(..., min_length=6, description="New password")
+    confirm_password: str = Field(..., min_length=6, description="Confirm password")
     
     @validator('confirm_password')
     def passwords_match(cls, v, values, **kwargs):
@@ -234,20 +417,22 @@ class PasswordReset(BaseModel):
             raise ValueError('Passwords do not match')
         return v
 
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
-                "token": "abc123def456ghi789",
+                "token": "reset_token",
                 "new_password": "newpassword123",
                 "confirm_password": "newpassword123"
             }
         }
+    }
 
 
 class PasswordChange(BaseModel):
+    """Password change schema"""
     old_password: str = Field(..., description="Current password")
-    new_password: str = Field(..., min_length=6, description="New password (minimum 6 characters)")
-    confirm_password: str = Field(..., min_length=6, description="Confirm new password")
+    new_password: str = Field(..., min_length=6, description="New password")
+    confirm_password: str = Field(..., min_length=6, description="Confirm password")
     
     @validator('confirm_password')
     def passwords_match(cls, v, values, **kwargs):
@@ -255,138 +440,72 @@ class PasswordChange(BaseModel):
             raise ValueError('Passwords do not match')
         return v
 
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "old_password": "oldpassword123",
                 "new_password": "newpassword123",
                 "confirm_password": "newpassword123"
             }
         }
+    }
 
 
 # Response schemas
 class MessageResponse(BaseModel):
+    """Generic message response"""
     message: str = Field(..., description="Response message")
+    status: str = Field(default="success", description="Response status")
+    data: Optional[Dict[str, Any]] = Field(default=None, description="Optional response data")
 
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
-                "message": "Operation completed successfully"
+                "message": "العملية تمت بنجاح",
+                "status": "success"
             }
         }
-
-
-class OTPResponse(BaseModel):
-    message: str = Field(..., description="Response message")
-    phone: str = Field(..., description="Phone number")
-    otp: Optional[str] = Field(None, description="OTP code (development only)")
-
-    class Config:
-        schema_extra = {
-            "example": {
-                "message": "OTP sent to your phone number",
-                "phone": "1234567890",
-                "otp": "123456"
-            }
-        }
-
-
-class OTPVerifyResponse(BaseModel):
-    message: str = Field(..., description="Response message")
-    phone: str = Field(..., description="Phone number")
-    verified: bool = Field(..., description="Verification status")
-
-    class Config:
-        schema_extra = {
-            "example": {
-                "message": "OTP verified successfully",
-                "phone": "1234567890",
-                "verified": True
-            }
-        }
-
-
-class PasswordResetResponse(BaseModel):
-    message: str = Field(..., description="Response message")
-    email: str = Field(..., description="Email address")
-    reset_token: Optional[str] = Field(None, description="Reset token (development only)")
-
-    class Config:
-        schema_extra = {
-            "example": {
-                "message": "Password reset link sent to your email",
-                "email": "user@example.com",
-                "reset_token": "abc123def456ghi789"
-            }
-        }
-
-
-class UserInfo(BaseModel):
-    id: int = Field(..., description="User ID")
-    name: str = Field(..., description="User's full name")
-    email: str = Field(..., description="User's email")
-    phone: Optional[str] = Field(None, description="User's phone number")
-    user_type: str = Field(..., description="User type")
-    is_active: bool = Field(..., description="Account status")
-    profile_image_url: Optional[str] = Field(None, description="Profile image URL")
-    
-    # Student specific fields
-    date_of_birth: Optional[datetime] = Field(None, description="Date of birth (students only)")
-    gender: Optional[str] = Field(None, description="Gender (students only)")
-    country: Optional[str] = Field(None, description="Country")
-    city: Optional[str] = Field(None, description="City")
-    status: Optional[str] = Field(None, description="Account status (students only)")
-    email_verified: Optional[bool] = Field(None, description="Email verification status")
-    phone_verified: Optional[bool] = Field(None, description="Phone verification status")
-    last_login: Optional[datetime] = Field(None, description="Last login time")
-    
-    # Academy specific fields
-    academy_name: Optional[str] = Field(None, description="Academy name")
-    user_name: Optional[str] = Field(None, description="Username")
-    is_owner: Optional[bool] = Field(None, description="Owner status")
-    logo_url: Optional[str] = Field(None, description="Academy logo URL")
-    cover_url: Optional[str] = Field(None, description="Academy cover URL")
-    
-    # Admin specific fields
-    role_id: Optional[int] = Field(None, description="Role ID")
-
-    class Config:
-        schema_extra = {
-            "example": {
-                "id": 1,
-                "name": "أحمد علي",
-                "email": "ahmed@example.com",
-                "phone": "1234567890",
-                "user_type": "student",
-                "is_active": True,
-                "profile_image_url": "/static/uploads/profiles/profile.png",
-                "date_of_birth": "1995-01-01T00:00:00Z",
-                "gender": "male",
-                "country": "السعودية",
-                "city": "الرياض",
-                "status": "active",
-                "email_verified": True,
-                "phone_verified": True,
-                "last_login": "2023-12-01T10:30:00Z"
-            }
-        }
+    }
 
 
 class UserInfoResponse(BaseModel):
-    message: str = Field(..., description="Response message")
-    user: UserInfo = Field(..., description="User information")
+    """User information response"""
+    id: int = Field(..., description="User ID")
+    fname: str = Field(..., description="First name")
+    mname: Optional[str] = Field(None, description="Middle name")
+    lname: str = Field(..., description="Last name")
+    email: str = Field(..., description="Email")
+    phone_number: str = Field(..., description="Phone number")
+    user_type: str = Field(..., description="User type")
+    account_type: str = Field(..., description="Account type")
+    status: str = Field(..., description="Account status")
+    verified: bool = Field(..., description="Verification status")
+    avatar: Optional[str] = Field(None, description="Avatar URL")
+    banner: Optional[str] = Field(None, description="Banner URL")
+    created_at: datetime = Field(..., description="Registration date")
+    
+    # Student specific fields
+    birth_date: Optional[datetime] = Field(None, description="Birth date")
+    gender: Optional[str] = Field(None, description="Gender")
+    
+    # Academy specific fields
+    academy_name: Optional[str] = Field(None, description="Academy name")
+    academy_id: Optional[str] = Field(None, description="Academy ID")
+    academy_about: Optional[str] = Field(None, description="Academy description")
 
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
-                "message": "User information retrieved successfully",
-                "user": {
-                    "id": 1,
-                    "name": "Ahmed Ali",
-                    "email": "ahmed@example.com",
-                    "user_type": "student",
-                    "is_active": True
-                }
+                "id": 1,
+                "fname": "أحمد",
+                "lname": "علي",
+                "email": "ahmed@example.com",
+                "phone_number": "1234567890",
+                "user_type": "student",
+                "account_type": "local",
+                "status": "active",
+                "verified": True,
+                "created_at": "2023-12-01T10:00:00Z"
             }
-        } 
+        }
+    } 

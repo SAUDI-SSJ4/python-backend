@@ -28,6 +28,40 @@ class Settings(BaseSettings):
     # CORS
     BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = []
 
+    # Email Settings - New Mail Configuration
+    MAIL_MAILER: str = "smtp"
+    MAIL_HOST: str
+    MAIL_PORT: int
+    MAIL_USERNAME: str
+    MAIL_PASSWORD: str
+    MAIL_ENCRYPTION: str = "tls"
+    MAIL_FROM_ADDRESS: str
+    MAIL_FROM_NAME: str
+    
+    # Legacy Email Settings - SMTP Configuration (for compatibility)
+    SMTP_HOST: str
+    SMTP_PORT: int
+    SMTP_USERNAME: str
+    SMTP_PASSWORD: str
+    SMTP_USE_TLS: bool = True
+    EMAIL_FROM: str
+    EMAIL_FROM_NAME: str
+    
+    # Google OAuth Configuration
+    GOOGLE_CLIENT_ID: str
+    GOOGLE_CLIENT_SECRET: str
+    GOOGLE_REDIRECT_URI: str
+    
+    # Rate Limiting
+    RATE_LIMIT_REQUESTS_PER_MINUTE: int = 60
+    OTP_RATE_LIMIT_PER_HOUR: int = 3
+    PASSWORD_RESET_RATE_LIMIT_PER_HOUR: int = 3
+    
+    # Security Settings
+    BCRYPT_ROUNDS: int = 12
+    OTP_EXPIRY_MINUTES: int = 15
+    PASSWORD_RESET_EXPIRY_MINUTES: int = 15
+
     @validator("BACKEND_CORS_ORIGINS", pre=True)
     def assemble_cors_origins(cls, v: Union[str, List[str]]) -> Union[List[str], str]:
         if isinstance(v, str):

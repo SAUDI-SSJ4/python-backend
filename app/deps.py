@@ -5,14 +5,13 @@ from sqlalchemy.orm import Session
 
 from app.core import security
 from app.db.session import SessionLocal
-from app.models.student import Student, StudentStatus
-from app.models.academy import AcademyUser
-from app.models.admin import Admin
+from app.models.user import User, UserStatus, UserType
 
 security_scheme = HTTPBearer()
 
 
 def get_db() -> Generator:
+    """Database dependency"""
     try:
         db = SessionLocal()
         yield db
@@ -20,97 +19,125 @@ def get_db() -> Generator:
         db.close()
 
 
-def validate_user_status(user: Union[Student, AcademyUser, Admin], user_type: str) -> bool:
-    """Validate if user account is active"""
-    if user_type == "student":
-        return user.status == StudentStatus.ACTIVE
-    elif user_type in ["academy", "admin"]:
-        return getattr(user, 'is_active', True)
-    return False
-
-
-async def get_current_user(
+def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security_scheme),
     db: Session = Depends(get_db)
-) -> tuple[Union[Student, AcademyUser, Admin], str]:
+) -> User:
     """Get current authenticated user from JWT token"""
     
     token = credentials.credentials
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
+        detail={
+            "error": "unauthorized",
+            "message": "Could not validate credentials",
+            "status_code": 401
+        },
         headers={"WWW-Authenticate": "Bearer"},
     )
     
     try:
-        # Try to decode token for each user type
-        for user_type in ["student", "academy", "admin"]:
-            payload = security.decode_token(token, user_type)
-            if payload:
-                user_id = int(payload.get("sub"))
-                
-                if user_type == "student":
-                    user = db.query(Student).filter(Student.id == user_id).first()
-                elif user_type == "academy":
-                    user = db.query(AcademyUser).filter(AcademyUser.id == user_id).first()
-                elif user_type == "admin":
-                    user = db.query(Admin).filter(Admin.id == user_id).first()
-                
-                if user and validate_user_status(user, user_type):
-                    return user, user_type
+        # Decode token
+        payload = security.decode_token(token)
+        if not payload:
+            raise credentials_exception
+            
+        user_id = payload.get("user_id")
+        if not user_id:
+            raise credentials_exception
+            
+        # Get user from database
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise credentials_exception
+            
+        # Check if user is active
+        if user.status == "blocked":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error": "account_blocked",
+                    "message": "الحساب محظور",
+                    "status_code": 403
+                }
+            )
         
-        raise credentials_exception
+        return user
         
+    except HTTPException:
+        raise
     except Exception:
         raise credentials_exception
 
 
-async def get_current_student(
-    current_user_data: tuple = Depends(get_current_user)
-) -> Student:
+def get_current_student(
+    current_user: User = Depends(get_current_user)
+) -> User:
     """Get current authenticated student"""
-    user, user_type = current_user_data
-    if user_type != "student":
+    if current_user.user_type != "student":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied. Student access required."
+            detail={
+                "error": "access_denied",
+                "message": "مطلوب حساب طالب للوصول لهذه الخدمة",
+                "status_code": 403
+            }
         )
-    return user
+    return current_user
 
 
-async def get_current_academy(
-    current_user_data: tuple = Depends(get_current_user)
-) -> AcademyUser:
+def get_current_academy(
+    current_user: User = Depends(get_current_user)
+) -> User:
     """Get current authenticated academy user"""
-    user, user_type = current_user_data
-    if user_type != "academy":
+    if current_user.user_type != "academy":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied. Academy access required."
+            detail={
+                "error": "access_denied",
+                "message": "مطلوب حساب أكاديمية للوصول لهذه الخدمة",
+                "status_code": 403
+            }
         )
-    return user
+    return current_user
 
 
-async def get_current_admin(
-    current_user_data: tuple = Depends(get_current_user)
-) -> Admin:
-    """Get current authenticated admin"""
-    user, user_type = current_user_data
-    if user_type != "admin":
+def get_current_active_user(
+    current_user: User = Depends(get_current_user)
+) -> User:
+    """Get current active user (verified and active)"""
+    if current_user.status != "active":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied. Admin access required."
+            detail={
+                "error": "account_not_active",
+                "message": "الحساب غير مفعل، يرجى التحقق من البريد الإلكتروني أو رقم الهاتف",
+                "status_code": 403
+            }
         )
-    return user
-
-
-async def get_current_academy_owner(
-    current_user: AcademyUser = Depends(get_current_academy)
-) -> AcademyUser:
-    """Get current authenticated academy owner"""
-    if not getattr(current_user, 'is_owner', False):
+    
+    if not current_user.verified:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied. Academy owner access required."
+            detail={
+                "error": "account_not_verified",
+                "message": "الحساب غير محقق، يرجى إكمال عملية التحقق",
+                "status_code": 403
+            }
         )
-    return current_user 
+    
+    return current_user
+
+
+def get_current_verified_student(
+    current_user: User = Depends(get_current_student)
+) -> User:
+    """Get current verified student"""
+    return get_current_active_user(current_user)
+
+
+def get_current_verified_academy(
+    current_user: User = Depends(get_current_academy)
+) -> User:
+    """Get current verified academy"""
+    return get_current_active_user(current_user) 

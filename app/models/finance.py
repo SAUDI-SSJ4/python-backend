@@ -3,6 +3,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.base import Base
 import enum
+from app.models.marketing import Coupon
 
 
 class PaymentStatus(str, enum.Enum):
@@ -61,10 +62,9 @@ class Payment(Base):
     # Relationships
     student = relationship("Student", back_populates="payments")
     academy = relationship("Academy")
-    coupon = relationship("Coupon")
+    coupon = relationship("Coupon", back_populates="payments")
     payment_rows = relationship("PaymentRow", back_populates="payment")
     transactions = relationship("Transaction", back_populates="payment")
-    subscription = relationship("Subscription", back_populates="payment")
 
 
 class PaymentRow(Base):
@@ -119,7 +119,6 @@ class WithdrawalRequest(Base):
     swift_code = Column(String(50), nullable=True)
     notes = Column(Text, nullable=True)
     admin_notes = Column(Text, nullable=True)
-    approved_by = Column(Integer, ForeignKey("admins.id"), nullable=True)
     approved_at = Column(DateTime(timezone=True), nullable=True)
     rejected_at = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
@@ -128,7 +127,7 @@ class WithdrawalRequest(Base):
 
     # Relationships
     academy = relationship("Academy")
-    admin = relationship("Admin")
+    # admin = relationship("Admin", foreign_keys=[approved_by])  # معطل مؤقتاً
 
 
 class AcademyFinance(Base):

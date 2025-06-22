@@ -57,8 +57,7 @@ class Package(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     # Relationships
-    academies = relationship("Academy", back_populates="package")
-    subscriptions = relationship("Subscription", back_populates="package")
+    subscriptions = relationship("Subscription", foreign_keys="Subscription.package_id")
 
 
 class DigitalProduct(Base):
@@ -84,7 +83,7 @@ class DigitalProduct(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     # Relationships
-    academy = relationship("Academy", back_populates="digital_products")
+    academy = relationship("Academy")
     student_digital_products = relationship("StudentDigitalProduct", back_populates="digital_product")
     ratings = relationship("DigitalProductRating", back_populates="digital_product")
 
@@ -121,3 +120,20 @@ class DigitalProductRating(Base):
     # Relationships
     student = relationship("Student", back_populates="digital_product_ratings")
     digital_product = relationship("DigitalProduct", back_populates="ratings") 
+
+
+class StudentProduct(Base):
+    __tablename__ = "student_products"
+
+    id = Column(Integer, primary_key=True, index=True)
+    student_id = Column(Integer, ForeignKey("students.id"), nullable=False)
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
+    payment_id = Column(Integer, ForeignKey("payments.id"), nullable=True)
+    quantity = Column(Integer, default=1)
+    purchased_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    student = relationship("Student", back_populates="student_products")
+    product = relationship("Product", back_populates="student_products")
+    payment = relationship("Payment") 

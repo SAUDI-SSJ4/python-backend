@@ -11,8 +11,8 @@ class BlogPostBase(BaseModel):
     featured_image: Optional[str] = Field(None, description="URL to featured image")
     is_featured: bool = Field(False, description="Whether the post is featured")
     
-    class Config:
-        json_schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "title": "Introduction to FastAPI",
                 "content": "FastAPI is a modern API framework...",
@@ -142,8 +142,8 @@ class TagBase(BaseModel):
     """Base schema for tags."""
     name: str = Field(..., min_length=2, max_length=50)
     
-    class Config:
-        json_schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "name": "FastAPI"
             }

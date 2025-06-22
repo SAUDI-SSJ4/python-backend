@@ -128,7 +128,7 @@ def get_user_by_phone(db: Session, phone: str) -> tuple[Optional[Union[Student, 
 def validate_user_status(user: Union[Student, AcademyUser, Admin], user_type: str) -> bool:
     """Validate if user account is active"""
     if user_type == "student":
-        return user.status == StudentStatus.ACTIVE
+        return user.status == "active"
     elif user_type in ["academy", "admin"]:
         return getattr(user, 'is_active', True)
     return False

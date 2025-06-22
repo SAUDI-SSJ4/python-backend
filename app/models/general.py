@@ -28,7 +28,7 @@ class Blog(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     # Relationships
-    academy = relationship("Academy", back_populates="blogs")
+    academy = relationship("Academy")
     posts = relationship("BlogPost", back_populates="blog")
 
 
@@ -72,7 +72,7 @@ class BlogPost(Base):
 
     # Relationships
     blog = relationship("Blog", back_populates="posts")
-    academy = relationship("Academy", back_populates="blog_posts")
+    academy = relationship("Academy")
     category = relationship("BlogCategory", back_populates="posts")
     comments = relationship("BlogComment", back_populates="post")
     keywords = relationship("BlogKeyword", secondary=blog_post_keywords, back_populates="posts")
