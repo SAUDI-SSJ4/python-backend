@@ -58,8 +58,9 @@ class Academy(Base):
     # العلاقات الأساسية فقط - بدون النماذج غير الموجودة
     user = relationship("User", back_populates="academy_profile")
     academy_users = relationship("AcademyUser", back_populates="academy")
-    finance = relationship("AcademyFinance", uselist=False, back_populates="academy")
-    coupons = relationship("Coupon", back_populates="academy")
+    # معلق مؤقتاً حتى يتم إصلاح models conflicts
+    # finance = relationship("AcademyFinance", uselist=False, back_populates="academy")
+    # coupons = relationship("Coupon", back_populates="academy")
 
 
 class AcademyUser(Base):
@@ -94,8 +95,8 @@ class Trainer(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
-    # Relationships
-    courses = relationship("Course", back_populates="trainer")
+    # Relationships - معلق مؤقتاً لحل conflicts
+    # courses = relationship("Course", back_populates="trainer")
 
 
 class Subscription(Base):

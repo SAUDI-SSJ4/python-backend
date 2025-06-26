@@ -165,7 +165,6 @@ class UnifiedLogin(BaseModel):
     email: Optional[EmailStr] = Field(None, description="User email address")
     phone: Optional[str] = Field(None, pattern="^[0-9]{10,15}$", description="Phone number")
     password: str = Field(..., min_length=6, description="Password")
-    user_type: str = Field(..., pattern="^(student|academy)$", description="User type")
     
     @validator('email')
     def validate_email_or_phone(cls, v, values):
@@ -177,12 +176,10 @@ class UnifiedLogin(BaseModel):
         "json_schema_extra": {
             "example": {
                 "email": "user@example.com",
-                "password": "password123",
-                "user_type": "student"
+                "password": "password123"
             }
         }
     }
-
 
 class UnifiedRegister(BaseModel):
     """Unified registration schema for both students and academies"""
@@ -294,7 +291,11 @@ class OTPRequest(BaseModel):
     """OTP request schema"""
     email: Optional[EmailStr] = Field(None, description="Email address")
     phone: Optional[str] = Field(None, pattern="^[0-9]{10,15}$", description="Phone number")
-    purpose: str = Field(..., pattern="^(login|password_reset|email_verification|transaction_confirmation)$", description="OTP purpose")
+    purpose: str = Field(..., pattern="^(login|password_reset|email_verification|phone_verification|transaction_confirmation|account_activation|change_password|email_update|phone_update|payment_confirmation|account_deletion|two_factor_auth|security_verification)$", description="OTP purpose")
+    
+    # حقول إضافية للأمان والتتبع
+    device_id: Optional[str] = Field(None, description="Device identifier")
+    expires_in_minutes: Optional[int] = Field(10, ge=1, le=60, description="OTP expiration time in minutes")
     
     @validator('email')
     def validate_email_or_phone(cls, v, values):
@@ -306,18 +307,18 @@ class OTPRequest(BaseModel):
         "json_schema_extra": {
             "example": {
                 "email": "user@example.com",
-                "purpose": "email_verification"
+                "purpose": "email_verification",
+                "expires_in_minutes": 15
             }
         }
     }
 
 
 class OTPVerify(BaseModel):
-    """OTP verification schema"""
+    """OTP verification schema - simplified without purpose"""
     email: Optional[EmailStr] = Field(None, description="Email address")
     phone: Optional[str] = Field(None, pattern="^[0-9]{10,15}$", description="Phone number")
     otp: str = Field(..., min_length=4, max_length=6, description="OTP code")
-    purpose: str = Field(..., pattern="^(login|password_reset|email_verification|transaction_confirmation)$", description="OTP purpose")
     
     @validator('email')
     def validate_email_or_phone(cls, v, values):
@@ -329,8 +330,7 @@ class OTPVerify(BaseModel):
         "json_schema_extra": {
             "example": {
                 "email": "user@example.com",
-                "otp": "123456",
-                "purpose": "email_verification"
+                "otp": "123456"
             }
         }
     }
@@ -406,8 +406,9 @@ class PasswordResetRequest(BaseModel):
 
 
 class PasswordReset(BaseModel):
-    """Password reset schema"""
-    token: str = Field(..., description="Reset token")
+    """Password reset schema using OTP"""
+    email: EmailStr = Field(..., description="Email address")
+    otp: str = Field(..., min_length=6, max_length=8, description="OTP code from email")
     new_password: str = Field(..., min_length=6, description="New password")
     confirm_password: str = Field(..., min_length=6, description="Confirm password")
     
@@ -420,7 +421,8 @@ class PasswordReset(BaseModel):
     model_config = {
         "json_schema_extra": {
             "example": {
-                "token": "reset_token",
+                "email": "user@example.com",
+                "otp": "123456",
                 "new_password": "newpassword123",
                 "confirm_password": "newpassword123"
             }

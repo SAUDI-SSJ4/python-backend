@@ -178,41 +178,67 @@ async def register_student(
     db: Session = Depends(get_db),
     request: Request,
     background_tasks: BackgroundTasks,
-    # Student registration data
-    name: str = Form(..., description="الاسم الكامل"),
-    email: str = Form(..., description="البريد الإلكتروني"),
-    phone: str = Form(..., description="رقم الهاتف"),
-    password: str = Form(..., description="كلمة المرور"),
-    password_confirm: str = Form(..., description="تأكيد كلمة المرور"),
-    date_of_birth: Optional[str] = Form(None, description="تاريخ الميلاد"),
-    gender: Optional[str] = Form(None, description="الجنس"),
+    # Required student registration data
+    name: str = Form(..., description="الاسم الكامل (2-255 حرف)", min_length=2, max_length=255),
+    email: str = Form(..., description="البريد الإلكتروني (فريد)"),
+    phone: str = Form(..., description="رقم الهاتف (10-15 رقم، فريد)", min_length=10, max_length=15),
+    password: str = Form(..., description="كلمة المرور (6 أحرف على الأقل)", min_length=6),
+    password_confirm: str = Form(..., description="تأكيد كلمة المرور (يجب أن تطابق كلمة المرور)"),
+    # Optional student information
+    date_of_birth: Optional[str] = Form(None, description="تاريخ الميلاد (YYYY-MM-DD)"),
+    gender: Optional[str] = Form(None, description="الجنس (male/female/other)"),
     country: Optional[str] = Form(None, description="الدولة"),
     city: Optional[str] = Form(None, description="المدينة"),
-    # Optional profile image
-    profile_image: Optional[UploadFile] = File(None, description="الصورة الشخصية (اختياري)")
+    # Profile image options (choose one method)
+    profile_image: Optional[UploadFile] = File(
+        None, 
+        description="رفع صورة شخصية (ملف) | الأولوية الأولى | PNG, JPG, WEBP | حد أقصى 5MB"
+    ),
+    avatar_url: Optional[str] = Form(
+        None, 
+        description="رابط صورة شخصية (URL) | الأولوية الثانية | يُستخدم إذا لم يتم رفع ملف"
+    )
 ) -> Any:
     """
-    Register a new student account with optional profile image (Form Data)
+    ## تسجيل حساب طالب جديد مع إمكانية رفع صورة شخصية
     
-    This endpoint accepts multipart/form-data to handle file uploads.
+    ### هذا الـ endpoint يقبل multipart/form-data لدعم رفع الملفات
     
-    **Required Fields:**
-    - **name**: Student's full name (2-255 characters)
-    - **email**: Valid email address (unique)
-    - **phone**: Phone number (10-15 digits, unique)
-    - **password**: Password (minimum 6 characters)
-    - **password_confirm**: Password confirmation (must match password)
+    ---
     
-    **Optional Fields:**
-    - **date_of_birth**: Optional birth date
-    - **gender**: Optional gender (male/female/other)
-    - **country**: Optional country
-    - **city**: Optional city
+    ### الحقول المطلوبة:
+    - الاسم الأول والأخير
+    - البريد الإلكتروني (فريد)
+    - رقم الهاتف (فريد)
+    - كلمة المرور وتأكيدها
+    - تاريخ الميلاد والجنس
     
-    **Optional File Upload:**
-    - **profile_image**: Profile image (PNG, JPG, WEBP - Max 5MB)
+    ### الحقول الاختيارية:
+    - الاسم الأوسط
+    - صورة شخصية (ملف أو رابط)
     
-    **Returns:** Authentication tokens
+    ---
+    
+    ### خيارات الصورة الشخصية (اختر إحدى الطريقتين):
+    
+    #### 1. رفع ملف صورة (مُوصى به):
+    - اختر ملف من جهازك
+    - يتم تحسين الصورة وتصغيرها تلقائياً
+    - الصيغ المدعومة: PNG, JPG, JPEG, GIF, WEBP
+    - الحد الأقصى: 5MB
+    
+    #### 2. رابط صورة خارجي:
+    - أدخل رابط الصورة في حقل avatar_url
+    - يُستخدم فقط إذا لم يتم رفع ملف
+    - يجب أن يكون الرابط صالح وقابل للوصول
+    
+    ### الأولوية:
+    1. ملف الصورة المرفوع (إذا تم رفعه)
+    2. رابط الصورة (إذا لم يتم رفع ملف)
+    3. لا توجد صورة (إذا لم يتم إدخال أي منهما)
+    
+    ### العائد:
+    توكن المصادقة (access_token + refresh_token)
     """
     
     client_ip = request.client.host
@@ -298,10 +324,17 @@ async def register_student(
         # Create new student
         user = crud_student.student.create(db, obj_in=user_in)
         
-        # Upload profile image if provided
+        # Handle avatar/profile image (priority: profile_image > avatar_url)
+        profile_image_path = None
+        
         if profile_image:
+            # File upload takes priority
             profile_image_path = await file_service.upload_profile_image(profile_image, user.id, "student")
             user.profile_image = profile_image_path
+            db.commit()
+        elif avatar_url:
+            # Use provided URL (useful for Google OAuth)
+            user.profile_image = avatar_url
             db.commit()
         
         # Generate tokens
@@ -345,51 +378,82 @@ async def register_academy(
     db: Session = Depends(get_db),
     request: Request,
     background_tasks: BackgroundTasks,
-    # Academy registration data
-    academy_name: str = Form(..., description="اسم الأكاديمية"),
-    name: str = Form(..., description="اسم المدير"),
-    email: str = Form(..., description="البريد الإلكتروني"),
-    phone: str = Form(..., description="رقم الهاتف"),
-    password: str = Form(..., description="كلمة المرور"),
-    password_confirm: str = Form(..., description="تأكيد كلمة المرور"),
-    address: Optional[str] = Form(None, description="العنوان"),
+    # Required academy registration data
+    academy_name: str = Form(..., description="اسم الأكاديمية (2-255 حرف)", min_length=2, max_length=255),
+    name: str = Form(..., description="اسم المدير (2-255 حرف)", min_length=2, max_length=255),
+    email: str = Form(..., description="البريد الإلكتروني (فريد)"),
+    phone: str = Form(..., description="رقم الهاتف (10-15 رقم، فريد)", min_length=10, max_length=15),
+    password: str = Form(..., description="كلمة المرور (6 أحرف على الأقل)", min_length=6),
+    password_confirm: str = Form(..., description="تأكيد كلمة المرور (يجب أن تطابق كلمة المرور)"),
+    # Optional academy information
+    address: Optional[str] = Form(None, description="عنوان الأكاديمية"),
     country: Optional[str] = Form(None, description="الدولة"),
     city: Optional[str] = Form(None, description="المدينة"),
-    description: Optional[str] = Form(None, description="وصف الأكاديمية"),
-    # Optional image uploads
-    logo: Optional[UploadFile] = File(None, description="شعار الأكاديمية (اختياري)"),
-    cover: Optional[UploadFile] = File(None, description="غلاف الأكاديمية (اختياري)"),
-    profile_image: Optional[UploadFile] = File(None, description="الصورة الشخصية (اختياري)")
+    description: Optional[str] = Form(None, description="وصف الأكاديمية ونشاطها"),
+    # Image upload options
+    academy_logo: Optional[UploadFile] = File(
+        None, 
+        description="شعار الأكاديمية | PNG, JPG, WEBP | حد أقصى 5MB | سيتم تصغيره إلى 400x400"
+    ),
+    academy_cover: Optional[UploadFile] = File(
+        None, 
+        description="غلاف الأكاديمية | PNG, JPG, WEBP | حد أقصى 5MB | سيتم تصغيره إلى 1200x300"
+    ),
+    profile_image: Optional[UploadFile] = File(
+        None, 
+        description="صورة المدير الشخصية | PNG, JPG, WEBP | حد أقصى 5MB | سيتم تصغيرها إلى 200x200"
+    ),
+    avatar_url: Optional[str] = Form(
+        None, 
+        description="رابط صورة المدير (URL) | يُستخدم إذا لم يتم رفع صورة شخصية"
+    )
 ) -> Any:
     """
-    Register a new academy account with optional image uploads (Form Data)
+    ## تسجيل حساب أكاديمية جديدة مع إمكانية رفع الصور
     
-    This endpoint accepts multipart/form-data to handle file uploads.
+    ### هذا الـ endpoint يقبل multipart/form-data لدعم رفع الملفات
     
-    **Required Fields:**
-    - **academy_name**: Academy name (2-255 characters)
-    - **name**: Admin's full name
-    - **email**: Valid email address (unique)
-    - **phone**: Phone number (10-15 digits, unique)
-    - **password**: Password (minimum 6 characters)
-    - **password_confirm**: Password confirmation
+    ---
     
-    **Optional Fields:**
-    - **address**: Optional address
-    - **country**: Optional country
-    - **city**: Optional city
-    - **description**: Optional academy description
+    ### الحقول المطلوبة:
+    - اسم المدير (الأول والأخير)
+    - البريد الإلكتروني (فريد)
+    - رقم الهاتف (فريد)
+    - كلمة المرور وتأكيدها
+    - اسم الأكاديمية
     
-    **Optional File Uploads:**
-    - **logo**: Academy logo image (PNG, JPG, WEBP - Max 5MB)
-    - **cover**: Academy cover image (PNG, JPG, WEBP - Max 5MB)
-    - **profile_image**: Profile image (PNG, JPG, WEBP - Max 5MB)
+    ### الحقول الاختيارية:
+    - الاسم الأوسط للمدير
+    - وصف الأكاديمية
+    - شعار الأكاديمية
+    - غلاف الأكاديمية
+    - صورة المدير الشخصية
     
-    **Auto-Generated:**
-    - **slug**: Automatically generated from academy name
-    - **user_name**: Automatically generated from email
+    ### خيارات رفع الصور (جميعها اختيارية):
     
-    **Returns:** Authentication tokens with academy info
+    #### شعار الأكاديمية (logo)
+    - ملف صورة من جهازك
+    - سيتم تصغيره إلى 400x400 بكسل
+    - يظهر في صفحة الأكاديمية وقوائم البحث
+    
+    #### غلاف الأكاديمية (cover)
+    - ملف صورة من جهازك
+    - سيتم تصغيره إلى 1200x300 بكسل
+    - يظهر في رأس صفحة الأكاديمية
+    
+    #### صورة المدير الشخصية
+    - ملف صورة أو رابط خارجي
+    - سيتم تصغيرها إلى 200x200 بكسل
+    - تظهر في ملف المدير الشخصي
+    
+    ### ملاحظات هامة:
+    - جميع الصور اختيارية ويمكن إضافتها لاحقاً
+    - الصيغ المدعومة: PNG, JPG, JPEG, GIF, WEBP
+    - الحد الأقصى لكل ملف: 5MB
+    - يتم تحسين وضغط الصور تلقائياً
+    
+    ### العائد:
+    توكن المصادقة (access_token + refresh_token)
     """
     
     client_ip = request.client.host
@@ -497,12 +561,12 @@ async def register_academy(
         cover_path = None
         profile_image_path = None
         
-        if logo:
-            logo_path = await file_service.upload_academy_logo(logo, new_academy.id)
+        if academy_logo:
+            logo_path = await file_service.upload_academy_logo(academy_logo, new_academy.id)
             new_academy.logo = logo_path
             
-        if cover:
-            cover_path = await file_service.upload_academy_cover(cover, new_academy.id)
+        if academy_cover:
+            cover_path = await file_service.upload_academy_cover(academy_cover, new_academy.id)
             new_academy.cover = cover_path
         
         # Create new academy user
@@ -522,6 +586,11 @@ async def register_academy(
             db.flush()  # Get user ID
             profile_image_path = await file_service.upload_profile_image(profile_image, new_user.id, "academy")
             new_user.profile_image = profile_image_path
+        elif avatar_url:
+            # Use provided URL (useful for Google OAuth)
+            db.add(new_user)
+            db.flush()  # Get user ID
+            new_user.profile_image = avatar_url
         else:
             db.add(new_user)
         

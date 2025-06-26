@@ -318,12 +318,44 @@ async def unified_register(
         
         # إنشاء المستخدم أولاً
         register_request = UnifiedRegister(**registration_data)
-        user_tokens = RegistrationService.register_local_user(register_request, db, avatar)
+        user_tokens = await RegistrationService.register_local_user(register_request, db, avatar)
         
         return user_tokens
         
     except HTTPException:
         raise
+    except ValidationError as ve:
+        # معالجة أخطاء التحقق من Pydantic
+        error_message = "البيانات المُدخلة غير صحيحة"
+        
+        # استخراج رسائل أخطاء محددة
+        validation_errors = []
+        for error in ve.errors():
+            field = error.get('loc', ['unknown'])[-1]
+            error_type = error.get('type', '')
+            
+            if 'email' in error_type:
+                error_message = "البريد الإلكتروني غير صحيح"
+            elif field == 'phone_number':
+                error_message = "رقم الهاتف غير صحيح"
+            
+            validation_errors.append({
+                "field": field,
+                "message": error.get('msg', ''),
+                "type": error_type
+            })
+        
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "status": "error",
+                "error": "validation_error",
+                "message": error_message,
+                "status_code": 422,
+                "validation_errors": validation_errors,
+                "timestamp": get_current_timestamp()
+            }
+        )
     except Exception as e:
         if "already exists" in str(e).lower():
             raise HTTPException(

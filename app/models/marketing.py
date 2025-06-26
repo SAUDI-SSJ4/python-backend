@@ -29,8 +29,8 @@ class Coupon(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
-    # Relationships
-    academy = relationship("Academy", back_populates="coupons")
+    # Relationships - معلق مؤقتاً لحل conflicts
+    # academy = relationship("Academy", back_populates="coupons")
     payments = relationship("Payment", back_populates="coupon")
 
 

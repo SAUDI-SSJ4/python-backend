@@ -36,14 +36,18 @@ from .google import (
 from .otp import (
     OTPRequest,
     OTPVerify,
-    OTPResponse
+    OTPResponse,
+    OTPStatusResponse
 )
 
 # Password management schemas
 from .password import (
     PasswordChange,
     PasswordResetRequest,
-    PasswordReset
+    PasswordReset,
+    OTPVerifyForReset,
+    PasswordResetWithToken,
+    OTPVerificationResponse
 )
 
 # User profile schemas
@@ -82,11 +86,15 @@ __all__ = [
     "OTPRequest",
     "OTPVerify",
     "OTPResponse",
+    "OTPStatusResponse",
     
     # Password
     "PasswordChange",
     "PasswordResetRequest",
     "PasswordReset",
+    "OTPVerifyForReset",
+    "PasswordResetWithToken",
+    "OTPVerificationResponse",
     
     # User
     "UserInfoResponse",

@@ -43,7 +43,16 @@ def verify_payment(payment_id: str) -> Any:
         
         return payment
     
-    raise HTTPException(status_code=404, detail="Payment not found")
+    raise HTTPException(
+        status_code=404, 
+        detail={
+            "status": 404,
+            "error": "Not Found",
+            "message": "الدفعة غير موجودة",
+            "path": "/api/v1/payment/",
+            "timestamp": datetime.now().isoformat()
+        }
+    )
 
 
 @router.post("/process")

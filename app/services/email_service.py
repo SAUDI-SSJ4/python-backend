@@ -55,7 +55,7 @@ class EmailService:
         }
         
         operation = purpose_text.get(purpose, "العملية المطلوبة")
-        print(f"📧 إرسال OTP: {purpose} إلى {to_email}")
+        print(f" إرسال OTP: {purpose} إلى {to_email}")
         
         # Create message
         msg = MIMEMultipart()

@@ -4,12 +4,6 @@ from sqlalchemy.sql import func
 from enum import Enum
 from app.db.base import Base
 
-# Forward declarations to avoid circular imports
-from app.models.finance import Payment, StudentFinance
-from app.models.product import StudentDigitalProduct, DigitalProductRating
-from app.models.general import BlogComment
-from app.models.course import Answer, Rate, StudentCourse, StudentLessonProgress, Favourite
-
 
 class Gender(str, Enum):
     MALE = "male"
@@ -35,15 +29,21 @@ class Student(Base):
 
     # Relationships
     user = relationship("User", back_populates="student_profile")
-    payments = relationship("Payment", back_populates="student")
-    finance = relationship("StudentFinance", back_populates="student", uselist=False)
-    student_products = relationship("StudentProduct", back_populates="student")
-    student_digital_products = relationship("StudentDigitalProduct", back_populates="student")
-    digital_product_ratings = relationship("DigitalProductRating", back_populates="student")
-    blog_comments = relationship("BlogComment", back_populates="student")
-    answers = relationship("Answer", back_populates="student")
-    rates = relationship("Rate", back_populates="student")
-    student_courses = relationship("StudentCourse", back_populates="student")
-    lesson_progress = relationship("StudentLessonProgress", back_populates="student")
-    favourites = relationship("Favourite", back_populates="student")
+    # course_enrollments = relationship("StudentCourse", back_populates="student", lazy="dynamic")
+    
+    # Temporarily disabled relationships until models are properly defined
+    # payments = relationship("Payment", back_populates="student")
+    # finance = relationship("StudentFinance", back_populates="student", uselist=False)
+    # student_products = relationship("StudentProduct", back_populates="student")
+    # student_digital_products = relationship("StudentDigitalProduct", back_populates="student")
+    # digital_product_ratings = relationship("DigitalProductRating", back_populates="student")
+    # blog_comments = relationship("BlogComment", back_populates="student")
+    # answers = relationship("Answer", back_populates="student")
+    # rates = relationship("Rate", back_populates="student")
+    # student_courses = relationship("StudentCourse", back_populates="student")
+    # lesson_progress = relationship("StudentLessonProgress", back_populates="student")
+    # favourites = relationship("Favourite", back_populates="student")
+   
+    def __repr__(self):
+        return f"<Student(id={self.id}, user_id={self.user_id})>"
    

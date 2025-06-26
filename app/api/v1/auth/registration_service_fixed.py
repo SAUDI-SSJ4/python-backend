@@ -1,31 +1,12 @@
-"""
-Registration Service
-===================
-Unified registration logic for all user types and authentication methods
-"""
-
-from typing import Any, Optional, Dict
+from typing import Any, Dict, Optional
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
-
+from app.models.user import User
 from app.core import security
-from app.models.user import User, UserStatus, UserType, AccountType
-from app.models.student import Student
-from app.models.academy import Academy, AcademyUser
-from .auth_utils import (
-    generate_user_tokens,
-    create_student_profile,
-    create_academy_profile,
-    send_verification_otp,
-    generate_academy_id,
-    generate_academy_slug,
-    generate_academy_username,
-    get_current_timestamp
-)
-
+from .auth_utils import get_current_timestamp, generate_user_tokens, send_verification_otp, create_student_profile, create_academy_profile
 
 class RegistrationService:
-    """Unified registration service for all authentication methods"""
+    """Service for handling user registration"""
     
     @staticmethod
     def create_user_base(
@@ -108,7 +89,7 @@ class RegistrationService:
                 from app.services.file_service import FileService
                 file_service = FileService()
                 
-                # استخدام await لتشغيل async function
+                # استخدام await مباشرة للحصول على رابط الصورة
                 avatar_path = await file_service.upload_profile_image(avatar_file, new_user.id, register_data.user_type)
                 
                 # حفظ Avatar في جدول users
@@ -116,8 +97,10 @@ class RegistrationService:
                 db.commit()
                 db.refresh(new_user)
                 
+                print(f"✅ تم رفع Avatar بنجاح: {avatar_path}")
+                
             except Exception as e:
-                print(f"خطأ في رفع Avatar: {e}")
+                print(f"❌ خطأ في رفع Avatar: {e}")
                 # لا نرفع خطأ هنا حتى لا نؤثر على التسجيل
         
         # Create profile

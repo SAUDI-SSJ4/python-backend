@@ -305,7 +305,7 @@ class AuthService:
         try:
             # Here you can add actual SMS service
             logger.info(f"SMS OTP sent to {phone}: {otp}")
-            print(f"📱 SMS OTP to {phone}: {otp}")
+            print(f"SMS OTP to {phone}: {otp}")
             
         except Exception as e:
             logger.error(f"Failed to send SMS OTP: {str(e)}")
@@ -341,7 +341,7 @@ class AuthService:
         try:
             # In development mode, just print the email
             if settings.DEBUG:
-                print(f"📧 Email to {to_email}")
+                print(f" Email to {to_email}")
                 print(f"Subject: {subject}")
                 print(f"Body: {body}")
                 return

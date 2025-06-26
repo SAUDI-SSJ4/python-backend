@@ -447,14 +447,14 @@ def get_student_analytics(
                 "id": 1,
                 "title": "Fast Learner",
                 "description": "Completed 10 lessons in a week",
-                "icon": "⚡",
+                "icon": "",
                 "earned_at": datetime.now().isoformat()
             },
             {
                 "id": 2,
                 "title": "Quiz Master",
                 "description": "Scored 90%+ on 5 consecutive quizzes",
-                "icon": "🏆",
+                "icon": "",
                 "earned_at": datetime.now().isoformat()
             }
         ]

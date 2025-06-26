@@ -1,0 +1,10 @@
+Error message
+{
+    "status": 401,
+    "error": "Unauthorized",
+    "message": "البريد الإلكتروني أو كلمة المرور غير صحيحة",
+    "path": "/api/v1/auth/login",
+    "timestamp": "2025-06-26T10:08:31.518507"
+}
+
+Status codes for apis

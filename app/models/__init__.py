@@ -3,4 +3,38 @@ from .user import User, UserType, UserStatus, AccountType
 from .student import Student, Gender
 from .academy import Academy, AcademyUser, AcademyStatus, AcademyUserRole
 from .otp import OTP, OTPPurpose
-from .finance import AcademyFinance, StudentFinance, Payment, Transaction 
+# إعادة تفعيل Finance models بعد إصلاح conflicts
+from .finance import AcademyFinance, StudentFinance, Payment, Transaction
+from .admin import Admin
+# from .role import Role, Permission, RolePermission
+
+# Course-related models
+from .course import Course, CourseStatus, CourseType, CourseLevel
+from .chapter import Chapter
+from .lesson import Lesson, LessonType, VideoType
+from .video import Video
+from .exam import Exam, Question, QuestionOption, QuestionType
+from .interactive_tool import InteractiveTool
+from .lesson_progress import LessonProgress
+from .student_course import StudentCourse
+
+# AI Answer model
+from .ai_answer import AIAnswer
+
+# Export all models
+__all__ = [
+    # User models
+    "User", "UserType", "UserStatus", "AccountType",
+    "Student", "Gender",
+    "Academy", "AcademyUser", "AcademyStatus", "AcademyUserRole",
+    "OTP", "OTPPurpose",
+    "AcademyFinance", "StudentFinance", "Payment", "Transaction",
+    "Admin",
+    # "Role", "Permission", "RolePermission",
+    
+    # Course models
+    "Course", "CourseStatus", "CourseType", "CourseLevel",
+    "Chapter", "Lesson", "LessonType", "VideoType",
+    "Video", "Exam", "Question", "QuestionOption", "QuestionType",
+    "InteractiveTool", "LessonProgress", "StudentCourse", "AIAnswer"
+] 

@@ -164,15 +164,19 @@ class FileService:
         file_path = self.profile_images_dir / filename
         
         try:
+            # Reset file cursor to beginning
+            await file.seek(0)
+            
             # Save file
             with open(file_path, "wb") as buffer:
-                shutil.copyfileobj(file.file, buffer)
+                contents = await file.read()
+                buffer.write(contents)
             
             # Resize image
             self._resize_image(file_path, self.profile_size, crop=True)
             
-            # Return relative path
-            return f"profiles/{filename}"
+            # Return relative path for static serving
+            return f"static/uploads/profiles/{filename}"
             
         except Exception as e:
             # Delete file on error

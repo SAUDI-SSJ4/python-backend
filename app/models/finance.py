@@ -59,8 +59,8 @@ class Payment(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
-    # Relationships
-    student = relationship("Student", back_populates="payments")
+    # Relationships - معلق مؤقتاً لحل conflicts
+    # student = relationship("Student", back_populates="payments")
     academy = relationship("Academy")
     coupon = relationship("Coupon", back_populates="payments")
     payment_rows = relationship("PaymentRow", back_populates="payment")
@@ -99,10 +99,10 @@ class Transaction(Base):
     reference_id = Column(String(255), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    # Relationships
+    # Relationships - معلق مؤقتاً لحل conflicts
     payment = relationship("Payment", back_populates="transactions")
     academy = relationship("Academy")
-    student = relationship("Student")
+    # student = relationship("Student")
 
 
 class WithdrawalRequest(Base):
@@ -142,8 +142,8 @@ class AcademyFinance(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
-    # Relationships
-    academy = relationship("Academy", back_populates="finance")
+    # Relationships - معلق مؤقتاً لحل conflicts
+    # academy = relationship("Academy", back_populates="finance")
 
 
 class StudentFinance(Base):
@@ -157,8 +157,8 @@ class StudentFinance(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
-    # Relationships
-    student = relationship("Student", back_populates="finance")
+    # Relationships - معلق مؤقتاً لحل conflicts
+    # student = relationship("Student", back_populates="finance")
 
 
 class SayanFinance(Base):

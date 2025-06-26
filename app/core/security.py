@@ -2,9 +2,11 @@ from datetime import datetime, timedelta
 from typing import Any, Union, Optional
 from jose import jwt
 from passlib.context import CryptContext
+from fastapi.security import HTTPBearer
 from app.core.config import settings
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+oauth2_scheme = HTTPBearer()
 
 ALGORITHM = settings.ALGORITHM
 
