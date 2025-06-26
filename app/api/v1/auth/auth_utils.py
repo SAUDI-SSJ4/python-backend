@@ -5,23 +5,81 @@ Helper functions for authentication operations
 """
 
 from datetime import timedelta, datetime
-from typing import Any
+from typing import Any, Dict, Optional, List, Tuple
 from sqlalchemy.orm import Session
 import random
 import string
+import secrets
 
 from app.core import security
 from app.schemas.auth import Token
 from app.models.user import User
 from app.models.student import Student
 from app.models.academy import Academy, AcademyUser
-from app.models.otp import OTP
+from app.models.otp import OTP, OTPPurpose
 from app.services.email_service import email_service
 
+# Verification tokens storage (في production يجب استخدام Redis)
+_verification_tokens: Dict[str, Dict] = {}
 
 def get_current_timestamp():
     """Helper function to get current timestamp"""
     return datetime.utcnow().isoformat()
+
+
+def create_unified_error_response(
+    status_code: int = 400,
+    error_type: str = "Bad Request",
+    message: str = "خطأ في البيانات المرسلة",
+    path: str = "/api/v1/auth/",
+    validation_errors: Optional[Dict] = None,
+    required_fields: Optional[Dict] = None,
+    examples: Optional[Dict] = None
+) -> Dict[str, Any]:
+    """
+    إنشاء استجابة خطأ موحدة بنفس تنسيق ملف error
+    """
+    
+    response = {
+        "status": status_code,
+        "error": error_type,
+        "message": message,
+        "path": path,
+        "timestamp": datetime.utcnow().isoformat()
+    }
+    
+    return response
+
+
+def create_unified_success_response(
+    data: Any,
+    message: Optional[str] = None,
+    status_code: int = 200
+) -> Dict:
+    """إنشاء استجابة نجاح موحدة"""
+    if isinstance(data, Token):
+        # للـ Token objects، نعيدها كما هي لأنها تحتوي على البنية المطلوبة
+        return data
+    
+    response = {
+        "status": "success",
+        "status_code": status_code,
+        "data": data,
+        "timestamp": get_current_timestamp()
+    }
+    
+    if message:
+        response["message"] = message
+    
+    return response
+
+
+def create_validation_error_response(missing_fields: List[str] = None, invalid_fields: List[Dict] = None) -> Dict:
+    """إنشاء استجابة خطأ validation موحدة"""
+    return {
+        "missing_fields": missing_fields or [],
+        "invalid_fields": invalid_fields or []
+    }
 
 
 def generate_academy_id(name: str) -> str:
@@ -105,7 +163,7 @@ def send_verification_otp(user: User, db: Session):
         # حذف رموز التحقق السابقة
         db.query(OTP).filter(
             OTP.user_id == user.id,
-            OTP.purpose == "email_verification",
+            OTP.purpose == OTPPurpose.EMAIL_VERIFICATION,
             OTP.is_used == False
         ).delete()
         
@@ -116,7 +174,7 @@ def send_verification_otp(user: User, db: Session):
         otp_record = OTP(
             user_id=user.id,
             code=otp_code,
-            purpose="email_verification",
+            purpose=OTPPurpose.EMAIL_VERIFICATION,
             expires_at=expires_at,
             attempts=0,
             is_used=False
@@ -131,7 +189,7 @@ def send_verification_otp(user: User, db: Session):
             to_email=user.email,
             user_name=user_name,
             otp_code=otp_code,
-            purpose="email_verification"
+            purpose=OTPPurpose.EMAIL_VERIFICATION.value
         )
         
         return success
@@ -186,4 +244,59 @@ def generate_user_tokens(user: User, db: Session) -> Token:
         status_code=201,
         timestamp=get_current_timestamp(),
         user_data=user_data
-    ) 
+    )
+
+
+def generate_verification_token(user_id: int, email: str, purpose: str = "password_reset") -> str:
+    """إنشاء verification token"""
+    token = f"ver_{secrets.token_hex(16)}"
+    expires_at = datetime.utcnow() + timedelta(minutes=5)  # 5 دقائق صلاحية
+    
+    _verification_tokens[token] = {
+        "user_id": user_id,
+        "email": email,
+        "purpose": purpose,
+        "created_at": datetime.utcnow(),
+        "expires_at": expires_at
+    }
+    
+    return token
+
+
+def verify_verification_token(token: str) -> Tuple[bool, Optional[Dict], Optional[str]]:
+    """التحقق من verification token"""
+    
+    if token not in _verification_tokens:
+        return False, None, "التوكن غير صحيح"
+    
+    token_data = _verification_tokens[token]
+    
+    # فحص انتهاء الصلاحية
+    if datetime.utcnow() > token_data["expires_at"]:
+        # حذف التوكن المنتهي الصلاحية
+        del _verification_tokens[token]
+        return False, None, "انتهت صلاحية التوكن"
+    
+    return True, token_data, None
+
+
+def invalidate_verification_token(token: str) -> bool:
+    """إلغاء verification token بعد الاستخدام"""
+    if token in _verification_tokens:
+        del _verification_tokens[token]
+        return True
+    return False
+
+
+def cleanup_expired_verification_tokens():
+    """تنظيف التوكنات المنتهية الصلاحية"""
+    current_time = datetime.utcnow()
+    expired_tokens = [
+        token for token, data in _verification_tokens.items() 
+        if current_time > data["expires_at"]
+    ]
+    
+    for token in expired_tokens:
+        del _verification_tokens[token]
+    
+    return len(expired_tokens) 

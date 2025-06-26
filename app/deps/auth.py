@@ -7,6 +7,7 @@ from jose import jwt, JWTError
 from app.core import security
 from app.core.config import settings
 from app.deps.database import get_db
+from app.models.user import User
 from app.models.admin import Admin
 from app.models.academy import AcademyUser
 from app.models.student import Student
@@ -16,53 +17,76 @@ security_scheme = HTTPBearer()
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security_scheme),
-    db: Session = Depends(get_db),
-    user_type: str = "student"
-) -> Optional[dict]:
+    db: Session = Depends(get_db)
+) -> User:
     """
     Get current user from JWT token.
     
     Args:
         credentials: Bearer token from request
         db: Database session
-        user_type: Expected user type
         
     Returns:
         User object or raises HTTPException
     """
+    from datetime import datetime
+    
     token = credentials.credentials
     
     try:
-        payload = security.decode_token(token, user_type)
+        payload = security.decode_token(token)
         if payload is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Could not validate credentials",
-                headers={"WWW-Authenticate": "Bearer"},
+                detail={
+                    "status": 401,
+                    "error": "Unauthorized",
+                    "message": "غير مخول للوصول",
+                    "path": "/api/v1/auth/",
+                    "timestamp": datetime.utcnow().isoformat()
+                }
             )
         
         user_id: int = int(payload.get("sub"))
         
-        # Get user based on type
-        if user_type == "admin":
-            user = db.query(Admin).filter(Admin.id == user_id).first()
-        elif user_type == "academy":
-            user = db.query(AcademyUser).filter(AcademyUser.id == user_id).first()
-        elif user_type == "student":
-            user = db.query(Student).filter(Student.id == user_id).first()
-        else:
-            user = None
+        # البحث في User table أولاً
+        user = db.query(User).filter(User.id == user_id).first()
             
         if user is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
+                detail={
+                    "status": 404,
+                    "error": "Not Found",
+                    "message": "المستخدم غير موجود",
+                    "path": "/api/v1/auth/",
+                    "timestamp": datetime.utcnow().isoformat()
+                }
             )
             
-        if hasattr(user, 'is_active') and not user.is_active:
+        # التحقق من حالة المستخدم
+        if user.status == "blocked":
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Inactive user"
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "status": 403,
+                    "error": "Forbidden",
+                    "message": "الحساب محظور",
+                    "path": "/api/v1/auth/",
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            )
+        
+        if user.status == "inactive":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "status": 403,
+                    "error": "Forbidden",
+                    "message": "الحساب غير مفعل",
+                    "path": "/api/v1/auth/",
+                    "timestamp": datetime.utcnow().isoformat()
+                }
             )
             
         return user
@@ -70,8 +94,13 @@ async def get_current_user(
     except JWTError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
-            headers={"WWW-Authenticate": "Bearer"},
+            detail={
+                "status": 401,
+                "error": "Unauthorized",
+                "message": "رمز المصادقة غير صحيح",
+                "path": "/api/v1/auth/",
+                "timestamp": datetime.utcnow().isoformat()
+            }
         )
 
 
@@ -80,7 +109,7 @@ async def get_current_admin(
     db: Session = Depends(get_db)
 ) -> Admin:
     """Get current admin user."""
-    return await get_current_user(credentials, db, "admin")
+    return await get_current_user(credentials, db)
 
 
 async def get_current_academy_user(
@@ -88,7 +117,7 @@ async def get_current_academy_user(
     db: Session = Depends(get_db)
 ) -> AcademyUser:
     """Get current academy user."""
-    return await get_current_user(credentials, db, "academy")
+    return await get_current_user(credentials, db)
 
 
 async def get_current_student(
@@ -96,7 +125,7 @@ async def get_current_student(
     db: Session = Depends(get_db)
 ) -> Student:
     """Get current student user."""
-    return await get_current_user(credentials, db, "student")
+    return await get_current_user(credentials, db)
 
 
 async def get_optional_current_user(
@@ -111,17 +140,25 @@ async def get_optional_current_user(
         return None
         
     try:
-        return await get_current_user(credentials, db, "student")
+        return await get_current_user(credentials, db)
     except HTTPException:
         return None
 
 
 def require_admin(current_user: Admin = Depends(get_current_admin)) -> Admin:
     """Require admin role."""
+    from datetime import datetime
+    
     if not current_user.is_superadmin and not current_user.role:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
+            detail={
+                "status": 403,
+                "error": "Forbidden",
+                "message": "صلاحيات غير كافية",
+                "path": "/api/v1/auth/",
+                "timestamp": datetime.utcnow().isoformat()
+            }
         )
     return current_user
 
