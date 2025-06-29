@@ -1,6 +1,7 @@
 from pydantic import BaseModel, EmailStr, Field, validator
 from typing import Optional, Dict, Any
 from datetime import datetime
+from .base import BaseResponse  # استيراد المخطط الموحد
 
 
 # Base schemas
@@ -339,14 +340,22 @@ class OTPVerify(BaseModel):
 # Token schemas
 class Token(BaseModel):
     """Authentication token response"""
-    access_token: str = Field(..., description="JWT access token")
-    refresh_token: str = Field(..., description="JWT refresh token")
-    token_type: str = Field(default="bearer", description="Token type")
-    user_type: str = Field(..., description="User type")
+    access_token: Optional[str] = Field(default=None, description="JWT access token")
+    refresh_token: Optional[str] = Field(default=None, description="JWT refresh token")
+    token_type: Optional[str] = Field(default=None, description="Token type")
+    user_type: Optional[str] = Field(default=None, description="User type")
     status: str = Field(default="success", description="Response status")
     status_code: Optional[int] = Field(default=200, description="HTTP status code")
+    error_type: Optional[str] = Field(default=None, description="Error category (null فى حالة النجاح)")
+    message: Optional[str] = Field(default="تمت العملية بنجاح", description="رسالة بشرية")
+    path: Optional[str] = Field(default=None, description="مسار الطلب")
     timestamp: Optional[str] = Field(default=None, description="Response timestamp")
-    user_data: Dict[str, Any] = Field(..., description="User information")
+    user_data: Optional[Dict[str, Any]] = Field(default=None, description="User information")
+
+    # استبعاد الحقول None تلقائياً فى المخرجات
+    def model_dump(self, *args, **kwargs):
+        kwargs.setdefault("exclude_none", True)
+        return super().model_dump(*args, **kwargs)
 
     model_config = {
         "json_schema_extra": {
@@ -367,7 +376,9 @@ class Token(BaseModel):
                     "status": "active"
                 }
             }
-        }
+        },
+        "extra": "allow",
+        "ser_json_exclude_none": True  # حذف الحقول None من الإخراج
     }
 
 
@@ -454,17 +465,19 @@ class PasswordChange(BaseModel):
 
 
 # Response schemas
-class MessageResponse(BaseModel):
-    """Generic message response"""
-    message: str = Field(..., description="Response message")
-    status: str = Field(default="success", description="Response status")
-    data: Optional[Dict[str, Any]] = Field(default=None, description="Optional response data")
+class MessageResponse(BaseResponse):
+    """رد بسيط يعتمد على البنية الموحدة، مع إمكانية إلحاق بيانات اختيارية"""
 
     model_config = {
         "json_schema_extra": {
             "example": {
-                "message": "العملية تمت بنجاح",
-                "status": "success"
+                "status": "success",
+                "status_code": 200,
+                "error_type": None,
+                "message": "تمت العملية بنجاح",
+                "data": None,
+                "path": "/api/v1/...",
+                "timestamp": "2025-06-29T13:20:00.123456"
             }
         }
     }

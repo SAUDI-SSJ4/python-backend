@@ -10,6 +10,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse, JSONResponse
 from pathlib import Path
+from fastapi.exceptions import RequestValidationError
+from fastapi.encoders import jsonable_encoder
 
 # Import authentication router with error handling
 try:
@@ -124,71 +126,99 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Custom exception handler لمعالجة error responses
 @app.exception_handler(HTTPException)
 async def custom_http_exception_handler(request: Request, exc: HTTPException):
+    if isinstance(exc.detail, dict):
+        error_content = exc.detail.copy()
+        error_content["status"] = "error"
+        error_content["status_code"] = exc.status_code
+        if "error" in error_content and "error_type" not in error_content:
+            error_content["error_type"] = error_content.pop("error")
+        allowed_keys = {"status", "status_code", "error_type", "message", "path", "timestamp", "data"}
+
+        error_content.setdefault("path", str(request.url.path))
+
+        from datetime import datetime
+        error_content.setdefault("timestamp", datetime.utcnow().isoformat())
+
+        keys_to_remove = [key for key in error_content.keys() if key not in allowed_keys]
+        for key in keys_to_remove:
+            del error_content[key]
+
+        return JSONResponse(status_code=exc.status_code, content=error_content)
+
     from datetime import datetime
-    
-    # إذا كانت detail تحتوي على التنسيق الجديد المطلوب
-    if isinstance(exc.detail, dict) and "status" in exc.detail and "error" in exc.detail:
-        return JSONResponse(
-            status_code=exc.status_code,
-            content=exc.detail
-        )
-    
-    # تحويل رسائل الخطأ القديمة للتنسيق الجديد
-    error_message = str(exc.detail) if exc.detail else "حدث خطأ غير متوقع"
-    
-    # تحديد نوع الخطأ بناء على status_code
     error_type_mapping = {
         400: "Bad Request",
-        401: "Unauthorized", 
+        401: "Unauthorized",
         403: "Forbidden",
         404: "Not Found",
         422: "Validation Error",
         500: "Internal Server Error"
     }
-    
     error_type = error_type_mapping.get(exc.status_code, "API Error")
-    
-    # بناء response بالتنسيق المطلوب
+    error_message = str(exc.detail) if exc.detail else "حدث خطأ غير متوقع"
     error_response = {
-        "status": exc.status_code,
-        "error": error_type,
+        "status": "error",
+        "status_code": exc.status_code,
+        "error_type": error_type,
         "message": error_message,
+        "data": None,
         "path": str(request.url.path),
         "timestamp": datetime.utcnow().isoformat()
     }
-    
-    return JSONResponse(
-        status_code=exc.status_code,
-        content=error_response
-    )
+
+    return JSONResponse(status_code=exc.status_code, content=error_response)
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """          (HTTP 422)"""
+
+    from datetime import datetime
+
+    first_error = exc.errors()[0] if exc.errors() else {}
+    loc = " -> ".join(str(item) for item in first_error.get("loc", []))
+
+    def _make_json_serializable(err_list):
+        serializable = []
+        for err in err_list:
+            safe_err = {}
+            for k, v in err.items():
+                try:
+                    import json
+                    json.dumps(v, default=str)
+                    safe_err[k] = v
+                except TypeError:
+                    safe_err[k] = str(v)
+            serializable.append(safe_err)
+        return serializable
+
+    errors_serialized = _make_json_serializable(exc.errors()) if exc.errors() else None
+
+    error_response = {
+        "status": "error",
+        "status_code": 422,
+        "error_type": "Validation Error",
+        "data": {"errors": errors_serialized} if errors_serialized else None,
+        "path": str(request.url.path),
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+    return JSONResponse(status_code=422, content=jsonable_encoder(error_response))
 
 # Include authentication routers
 if main_auth_available:
     app.include_router(
         main_auth_router,
-        prefix="/api/v1/auth",
-        tags=["Authentication"]
+        prefix="/api/v1/auth"
     )
     print("Main authentication router registered successfully")
     
     if auth_available:
-        app.include_router(
-            modular_auth_router,
-            prefix="/api/v1/auth/advanced",
-            tags=["Advanced Authentication"]
-        )
-        print("Modular authentication router registered on /api/v1/auth/advanced")
-        
+        pass
+
 elif auth_available:
-    app.include_router(
-        modular_auth_router,
-        prefix="/api/v1/auth",
-        tags=["Authentication"]
-    )
-    print("Modular authentication router registered successfully (fallback)")
+    pass
 
 # Include courses routers
 if courses_main_available:
@@ -260,7 +290,6 @@ def health_check():
     
     return {
         "status": "healthy",
-        "message": "نظام إدارة الكورسات الشامل - SAYAN API is running",
         "version": "2.0.0",
         "available_endpoints": [
             "/docs - API Documentation",

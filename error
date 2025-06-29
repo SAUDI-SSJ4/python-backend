@@ -8,3 +8,11 @@ Error message
 }
 
 Status codes for apis
+
+{
+  "status": "success",
+  "status_code": 200,
+  "message": "تمت العملية بنجاح",
+  "data": { … },
+  "timestamp": "2025-06-29T13:20:00.123456"
+}

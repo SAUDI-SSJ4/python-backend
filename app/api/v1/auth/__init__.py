@@ -13,10 +13,22 @@ from .auth_password import router as password_router
 # إنشاء router رئيسي للمصادقة
 auth_router = APIRouter()
 
-# تجميع جميع الـ routers
-auth_router.include_router(basic_router, tags=["Authentication"])
-auth_router.include_router(otp_router, prefix="/otp", tags=["OTP"])
-auth_router.include_router(password_router, prefix="/password", tags=["Password"])
+# تجميع الـ routers الأساسية فقط في Swagger، بينما نخفي OTP و Password لمنع التكرار
+auth_router.include_router(basic_router)
+
+# مسارات OTP القديمة (لا تظهر في Swagger)
+auth_router.include_router(
+    otp_router,
+    prefix="/otp",
+    include_in_schema=False  # إخفاء من التوثيق لتجنب الازدواجية
+)
+
+# مسارات Password القديمة (لا تظهر في Swagger)
+auth_router.include_router(
+    password_router,
+    prefix="/password",
+    include_in_schema=False  # إخفاء من التوثيق لتجنب الازدواجية
+)
 
 # تصدير الـ router الرئيسي
 router = auth_router 

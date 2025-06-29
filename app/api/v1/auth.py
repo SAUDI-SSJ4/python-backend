@@ -36,6 +36,15 @@ from app.schemas.auth import (
 from app.models.academy import AcademyUser, Academy
 from app.models.admin import Admin
 from app.models.student import Student, StudentStatus
+from app.api.v1.auth.auth_utils import (
+    create_unified_error_response,
+    create_validation_error_response,
+    generate_verification_token,
+    verify_verification_token,
+    invalidate_verification_token,
+    create_unified_success_response
+)
+from app.schemas.base import BaseResponse
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -44,7 +53,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 security_scheme = HTTPBearer()
 
-# OTP storage (في الإنتاج يجب استخدام Redis أو قاعدة بيانات منفصلة)
 otp_storage: Dict[str, Dict[str, Any]] = {}
 
 # Password reset tokens storage
@@ -179,65 +187,45 @@ async def register_student(
     request: Request,
     background_tasks: BackgroundTasks,
     # Required student registration data
-    name: str = Form(..., description="الاسم الكامل (2-255 حرف)", min_length=2, max_length=255),
-    email: str = Form(..., description="البريد الإلكتروني (فريد)"),
-    phone: str = Form(..., description="رقم الهاتف (10-15 رقم، فريد)", min_length=10, max_length=15),
-    password: str = Form(..., description="كلمة المرور (6 أحرف على الأقل)", min_length=6),
-    password_confirm: str = Form(..., description="تأكيد كلمة المرور (يجب أن تطابق كلمة المرور)"),
     # Optional student information
-    date_of_birth: Optional[str] = Form(None, description="تاريخ الميلاد (YYYY-MM-DD)"),
-    gender: Optional[str] = Form(None, description="الجنس (male/female/other)"),
-    country: Optional[str] = Form(None, description="الدولة"),
-    city: Optional[str] = Form(None, description="المدينة"),
     # Profile image options (choose one method)
     profile_image: Optional[UploadFile] = File(
         None, 
-        description="رفع صورة شخصية (ملف) | الأولوية الأولى | PNG, JPG, WEBP | حد أقصى 5MB"
     ),
     avatar_url: Optional[str] = Form(
         None, 
-        description="رابط صورة شخصية (URL) | الأولوية الثانية | يُستخدم إذا لم يتم رفع ملف"
     )
 ) -> Any:
     """
-    ## تسجيل حساب طالب جديد مع إمكانية رفع صورة شخصية
     
-    ### هذا الـ endpoint يقبل multipart/form-data لدعم رفع الملفات
     
     ---
     
-    ### الحقول المطلوبة:
     - الاسم الأول والأخير
     - البريد الإلكتروني (فريد)
     - رقم الهاتف (فريد)
     - كلمة المرور وتأكيدها
     - تاريخ الميلاد والجنس
     
-    ### الحقول الاختيارية:
     - الاسم الأوسط
     - صورة شخصية (ملف أو رابط)
     
     ---
     
-    ### خيارات الصورة الشخصية (اختر إحدى الطريقتين):
     
-    #### 1. رفع ملف صورة (مُوصى به):
     - اختر ملف من جهازك
     - يتم تحسين الصورة وتصغيرها تلقائياً
     - الصيغ المدعومة: PNG, JPG, JPEG, GIF, WEBP
     - الحد الأقصى: 5MB
     
-    #### 2. رابط صورة خارجي:
     - أدخل رابط الصورة في حقل avatar_url
     - يُستخدم فقط إذا لم يتم رفع ملف
     - يجب أن يكون الرابط صالح وقابل للوصول
     
-    ### الأولوية:
     1. ملف الصورة المرفوع (إذا تم رفعه)
     2. رابط الصورة (إذا لم يتم رفع ملف)
     3. لا توجد صورة (إذا لم يتم إدخال أي منهما)
     
-    ### العائد:
     توكن المصادقة (access_token + refresh_token)
     """
     
@@ -307,7 +295,6 @@ async def register_student(
                 message = error['msg']
                 validation_errors.append(f"{field}: {message}")
             
-            error_message = "بيانات غير صحيحة: " + " | ".join(validation_errors)
             
             # In development mode, show detailed errors
             if settings.DEBUG:
@@ -379,80 +366,56 @@ async def register_academy(
     request: Request,
     background_tasks: BackgroundTasks,
     # Required academy registration data
-    academy_name: str = Form(..., description="اسم الأكاديمية (2-255 حرف)", min_length=2, max_length=255),
-    name: str = Form(..., description="اسم المدير (2-255 حرف)", min_length=2, max_length=255),
-    email: str = Form(..., description="البريد الإلكتروني (فريد)"),
-    phone: str = Form(..., description="رقم الهاتف (10-15 رقم، فريد)", min_length=10, max_length=15),
-    password: str = Form(..., description="كلمة المرور (6 أحرف على الأقل)", min_length=6),
-    password_confirm: str = Form(..., description="تأكيد كلمة المرور (يجب أن تطابق كلمة المرور)"),
     # Optional academy information
-    address: Optional[str] = Form(None, description="عنوان الأكاديمية"),
-    country: Optional[str] = Form(None, description="الدولة"),
-    city: Optional[str] = Form(None, description="المدينة"),
-    description: Optional[str] = Form(None, description="وصف الأكاديمية ونشاطها"),
     # Image upload options
     academy_logo: Optional[UploadFile] = File(
         None, 
-        description="شعار الأكاديمية | PNG, JPG, WEBP | حد أقصى 5MB | سيتم تصغيره إلى 400x400"
     ),
     academy_cover: Optional[UploadFile] = File(
         None, 
-        description="غلاف الأكاديمية | PNG, JPG, WEBP | حد أقصى 5MB | سيتم تصغيره إلى 1200x300"
     ),
     profile_image: Optional[UploadFile] = File(
         None, 
-        description="صورة المدير الشخصية | PNG, JPG, WEBP | حد أقصى 5MB | سيتم تصغيرها إلى 200x200"
     ),
     avatar_url: Optional[str] = Form(
         None, 
-        description="رابط صورة المدير (URL) | يُستخدم إذا لم يتم رفع صورة شخصية"
     )
 ) -> Any:
     """
-    ## تسجيل حساب أكاديمية جديدة مع إمكانية رفع الصور
     
-    ### هذا الـ endpoint يقبل multipart/form-data لدعم رفع الملفات
     
     ---
     
-    ### الحقول المطلوبة:
     - اسم المدير (الأول والأخير)
     - البريد الإلكتروني (فريد)
     - رقم الهاتف (فريد)
     - كلمة المرور وتأكيدها
     - اسم الأكاديمية
     
-    ### الحقول الاختيارية:
     - الاسم الأوسط للمدير
     - وصف الأكاديمية
     - شعار الأكاديمية
     - غلاف الأكاديمية
     - صورة المدير الشخصية
     
-    ### خيارات رفع الصور (جميعها اختيارية):
     
-    #### شعار الأكاديمية (logo)
     - ملف صورة من جهازك
     - سيتم تصغيره إلى 400x400 بكسل
     - يظهر في صفحة الأكاديمية وقوائم البحث
     
-    #### غلاف الأكاديمية (cover)
     - ملف صورة من جهازك
     - سيتم تصغيره إلى 1200x300 بكسل
     - يظهر في رأس صفحة الأكاديمية
     
-    #### صورة المدير الشخصية
     - ملف صورة أو رابط خارجي
     - سيتم تصغيرها إلى 200x200 بكسل
     - تظهر في ملف المدير الشخصي
     
-    ### ملاحظات هامة:
     - جميع الصور اختيارية ويمكن إضافتها لاحقاً
     - الصيغ المدعومة: PNG, JPG, JPEG, GIF, WEBP
     - الحد الأقصى لكل ملف: 5MB
     - يتم تحسين وضغط الصور تلقائياً
     
-    ### العائد:
     توكن المصادقة (access_token + refresh_token)
     """
     
@@ -645,7 +608,7 @@ async def register_academy(
 
 # ==================== Authentication Endpoints ====================
 
-@router.post("/login", response_model=Token)
+@router.post("/login", response_model=BaseResponse, response_model_exclude_none=True)
 async def login(
     *,
     db: Session = Depends(get_db),
@@ -688,7 +651,11 @@ async def login(
         # Log successful login
         log_auth_attempt(request, "login", True, {"user_id": user.id, "email": user_in.email, "user_type": user_type})
         
-        return tokens
+        return create_unified_success_response(
+            data=tokens,
+            status_code=200,
+            path="/api/v1/auth/login"
+        )
         
     except HTTPException as e:
         auth_service.record_failed_attempt(client_ip)
@@ -700,17 +667,9 @@ async def login(
         auth_service.record_failed_attempt(client_ip)
         log_auth_attempt(request, "login", False, {"email": user_in.email, "error": error_detail})
         
-        # In development mode, show actual error
-        if settings.DEBUG:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Login failed: {error_detail}"
-            )
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Login failed. Please try again."
-            )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+        )
 
 
 def _get_user_by_token(db: Session, token: str) -> tuple[Union[Student, AcademyUser, Admin], str]:
@@ -868,11 +827,14 @@ async def verify_otp(
         # Log successful verification
         log_auth_attempt(request, "verify_otp", True, {"phone": phone, "user_type": user_data["user_type"]})
         
-        return {
-            "message": "OTP verified successfully",
-            "phone": phone,
-            "verified": True
-        }
+        return create_unified_success_response(
+            data={
+                "phone": phone,
+                "verified": True
+            },
+            message="OTP verified successfully",
+            status_code=200
+        )
         
     except HTTPException:
         log_auth_attempt(request, "verify_otp", False, {"phone": phone, "error": "verification_failed"})
@@ -910,10 +872,12 @@ async def forgot_password(
     if not user:
         # Return success even if email doesn't exist (security best practice)
         log_auth_attempt(request, "forgot_password", False, {"email": email, "error": "email_not_found"})
-        return {
-            "message": "If this email is registered, you will receive a password reset link",
-            "email": email
-        }
+        return create_unified_success_response(
+            data={"email": email},
+            message="إذا كان البريد الإلكتروني موجود، سيتم إرسال رمز إعادة التعيين",
+            status_code=200,
+            path=request.url.path
+        )
     
     try:
         # Store reset token
@@ -925,17 +889,15 @@ async def forgot_password(
         # Log successful request
         log_auth_attempt(request, "forgot_password", True, {"email": email, "user_type": user_type})
         
-        # Prepare response
-        response_data = {
-            "message": "Password reset link sent to your email",
-            "email": email
-        }
-        
-        # Include reset token in development mode
+        resp_data = {"email": email}
         if settings.DEBUG:
-            response_data["reset_token"] = reset_token
-            
-        return response_data
+            resp_data["reset_token"] = reset_token
+        return create_unified_success_response(
+            data=resp_data,
+            message="تم إرسال رابط إعادة التعيين إلى بريدك الإلكتروني",
+            status_code=200,
+            path=request.url.path
+        )
         
     except Exception as e:
         logger.error(f"Password reset request failed: {str(e)}")
@@ -969,9 +931,11 @@ async def reset_password(
         # Log successful reset
         log_auth_attempt(request, "reset_password", True, {"token": reset_data.token[:8] + "..."})
         
-        return {
-            "message": "Password reset successfully"
-        }
+        return create_unified_success_response(
+            message="تم إعادة تعيين كلمة المرور بنجاح",
+            status_code=200,
+            path=request.url.path
+        )
         
     except HTTPException:
         log_auth_attempt(request, "reset_password", False, {"error": "reset_failed"})
@@ -1017,9 +981,11 @@ async def change_password(
         # Log successful change
         log_auth_attempt(request, "change_password", True, {"user_id": user.id, "user_type": user_type})
         
-        return {
-            "message": "Password changed successfully"
-        }
+        return create_unified_success_response(
+            message="تم تغيير كلمة المرور بنجاح",
+            status_code=200,
+            path=request.url.path
+        )
         
     except HTTPException:
         log_auth_attempt(request, "change_password", False, {"user_id": user.id, "error": "change_failed"})
@@ -1168,17 +1134,12 @@ async def upload_academy_logo(
     logo: UploadFile = File(..., description="شعار الأكاديمية (صورة)")
 ) -> Any:
     """
-    رفع شعار الأكاديمية
     
-    - **logo**: ملف صورة الشعار (PNG, JPG, WEBP)
     
-    يتطلب صلاحيات الأكاديمية. الحد الأقصى لحجم الملف: 5MB
-    أبعاد الصورة المقترحة: 400x400 بكسل
     """
     
     user, user_type = current_user_data
     
-    # التحقق من أن المستخدم من نوع أكاديمية
     if user_type != "academy":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -1186,7 +1147,6 @@ async def upload_academy_logo(
         )
     
     try:
-        # الحصول على الأكاديمية المرتبطة بالمستخدم
         academy = db.query(Academy).filter(Academy.id == user.academy_id).first()
         if not academy:
             raise HTTPException(
@@ -1194,14 +1154,11 @@ async def upload_academy_logo(
                 detail="الأكاديمية غير موجودة"
             )
         
-        # رفع الشعار
         logo_path = await file_service.upload_academy_logo(logo, academy.id)
         
-        # تحديث قاعدة البيانات في جدول Academy
         academy.logo = logo_path
         db.commit()
         
-        # تسجيل العملية بنجاح
         logger.info(f"Academy logo uploaded successfully: Academy ID {academy.id}")
         
         return {
@@ -1227,17 +1184,12 @@ async def upload_academy_cover(
     cover: UploadFile = File(..., description="غلاف الأكاديمية (صورة)")
 ) -> Any:
     """
-    رفع غلاف الأكاديمية
     
-    - **cover**: ملف صورة الغلاف (PNG, JPG, WEBP)
     
-    يتطلب صلاحيات الأكاديمية. الحد الأقصى لحجم الملف: 5MB
-    أبعاد الصورة المقترحة: 1200x300 بكسل
     """
     
     user, user_type = current_user_data
     
-    # التحقق من أن المستخدم من نوع أكاديمية
     if user_type != "academy":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -1245,7 +1197,6 @@ async def upload_academy_cover(
         )
     
     try:
-        # الحصول على الأكاديمية المرتبطة بالمستخدم
         academy = db.query(Academy).filter(Academy.id == user.academy_id).first()
         if not academy:
             raise HTTPException(
@@ -1253,14 +1204,11 @@ async def upload_academy_cover(
                 detail="الأكاديمية غير موجودة"
             )
         
-        # رفع الغلاف
         cover_path = await file_service.upload_academy_cover(cover, academy.id)
         
-        # تحديث قاعدة البيانات في جدول Academy
         academy.cover = cover_path
         db.commit()
         
-        # تسجيل العملية بنجاح
         logger.info(f"Academy cover uploaded successfully: Academy ID {academy.id}")
         
         return {
@@ -1286,21 +1234,15 @@ async def upload_profile_image(
     image: UploadFile = File(..., description="الصورة الشخصية")
 ) -> Any:
     """
-    رفع الصورة الشخصية للمستخدم
     
-    - **image**: ملف الصورة الشخصية (PNG, JPG, WEBP)
     
-    متاح لجميع أنواع المستخدمين. الحد الأقصى لحجم الملف: 5MB
-    أبعاد الصورة المقترحة: 200x200 بكسل
     """
     
     user, user_type = current_user_data
     
     try:
-        # رفع الصورة الشخصية
         image_path = await file_service.upload_profile_image(image, user.id, user_type)
         
-        # تحديث قاعدة البيانات حسب نوع المستخدم
         if user_type == "student":
             user.profile_image = image_path
         elif user_type == "academy":
@@ -1310,7 +1252,6 @@ async def upload_profile_image(
         
         db.commit()
         
-        # تسجيل العملية بنجاح
         logger.info(f"Profile image uploaded successfully: {user_type} {user.id}")
         
         return {

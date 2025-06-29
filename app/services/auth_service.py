@@ -50,6 +50,15 @@ class AuthService:
         if admin:
             return admin, "admin"
         
+        # Check unified users table (User model) كحل للمستخدمين المسجلين حديثاً
+        try:
+            from app.models.user import User as UnifiedUser
+            user_generic = db.query(UnifiedUser).filter(UnifiedUser.email == email).first()
+            if user_generic:
+                return user_generic, "student"  # نعاملهم كطلاب لأغراض التوكن
+        except Exception:
+            pass
+        
         return None, None
     
     def get_user_by_phone(self, db: Session, phone: str) -> Tuple[Optional[Union[Student, AcademyUser, Admin]], Optional[str]]:
@@ -69,6 +78,15 @@ class AuthService:
         admin = db.query(Admin).filter(Admin.phone == phone).first()
         if admin:
             return admin, "admin"
+        
+        # البحث في جدول User الموحد
+        try:
+            from app.models.user import User as UnifiedUser
+            user_generic = db.query(UnifiedUser).filter(UnifiedUser.phone_number == phone).first()
+            if user_generic:
+                return user_generic, "student"
+        except Exception:
+            pass
         
         return None, None
     
@@ -91,8 +109,8 @@ class AuthService:
                 detail="Invalid email or password"
             )
         
-        # Verify password
-        if not security.verify_password(password, user.hashed_password):
+        # Verify password (نعتمد على حقل password المشفر)
+        if not security.verify_password(password, user.password):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid email or password"

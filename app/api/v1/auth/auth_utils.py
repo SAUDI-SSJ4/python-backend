@@ -19,7 +19,6 @@ from app.models.academy import Academy, AcademyUser
 from app.models.otp import OTP, OTPPurpose
 from app.services.email_service import email_service
 
-# Verification tokens storage (في production يجب استخدام Redis)
 _verification_tokens: Dict[str, Dict] = {}
 
 def get_current_timestamp():
@@ -30,20 +29,23 @@ def get_current_timestamp():
 def create_unified_error_response(
     status_code: int = 400,
     error_type: str = "Bad Request",
-    message: str = "خطأ في البيانات المرسلة",
     path: str = "/api/v1/auth/",
     validation_errors: Optional[Dict] = None,
     required_fields: Optional[Dict] = None,
-    examples: Optional[Dict] = None
+    examples: Optional[Dict] = None,
+    error_code: Optional[str] = None,
+    **kwargs
 ) -> Dict[str, Any]:
     """
     إنشاء استجابة خطأ موحدة بنفس تنسيق ملف error
     """
     
     response = {
-        "status": status_code,
-        "error": error_type,
+        "status": "error",
+        "status_code": status_code,
+        "error_type": error_code or error_type,
         "message": message,
+        "data": None,
         "path": path,
         "timestamp": datetime.utcnow().isoformat()
     }
@@ -52,30 +54,27 @@ def create_unified_error_response(
 
 
 def create_unified_success_response(
-    data: Any,
-    message: Optional[str] = None,
-    status_code: int = 200
+    data: Any = None,
+    status_code: int = 200,
+    path: str | None = None
 ) -> Dict:
     """إنشاء استجابة نجاح موحدة"""
     if isinstance(data, Token):
-        # للـ Token objects، نعيدها كما هي لأنها تحتوي على البنية المطلوبة
         return data
-    
-    response = {
+
+    return {
         "status": "success",
         "status_code": status_code,
+        "error_type": None,
+        "message": message,
         "data": data,
+        "path": path,
         "timestamp": get_current_timestamp()
     }
-    
-    if message:
-        response["message"] = message
-    
-    return response
 
 
 def create_validation_error_response(missing_fields: List[str] = None, invalid_fields: List[Dict] = None) -> Dict:
-    """إنشاء استجابة خطأ validation موحدة"""
+    """   validation """
     return {
         "missing_fields": missing_fields or [],
         "invalid_fields": invalid_fields or []
@@ -90,7 +89,7 @@ def generate_academy_id(name: str) -> str:
 
 
 def generate_academy_slug(academy_name: str) -> str:
-    """إنشاء slug للأكاديمية"""
+    """ slug """
     import re
     
     slug = academy_name.lower()
@@ -118,7 +117,7 @@ def generate_academy_username(academy_name: str) -> str:
 
 
 def create_student_profile(user: User, register_data: Any, db: Session):
-    """إنشاء ملف الطالب"""
+    """  """
     gender = register_data.gender if register_data.gender else None
     
     student_profile = Student(
@@ -158,16 +157,14 @@ def create_academy_profile(user: User, register_data: Any, db: Session):
 
 
 def send_verification_otp(user: User, db: Session):
-    """إرسال رمز التحقق إلى البريد الإلكتروني"""
+    """     """
     try:
-        # حذف رموز التحقق السابقة
         db.query(OTP).filter(
             OTP.user_id == user.id,
             OTP.purpose == OTPPurpose.EMAIL_VERIFICATION,
             OTP.is_used == False
         ).delete()
         
-        # إنشاء رمز جديد
         otp_code = ''.join(random.choices(string.digits, k=6))
         expires_at = datetime.utcnow() + timedelta(minutes=15)
         
@@ -183,7 +180,6 @@ def send_verification_otp(user: User, db: Session):
         db.add(otp_record)
         db.commit()
         
-        # إرسال البريد الإلكتروني
         user_name = f"{user.fname} {user.lname}"
         success = email_service.send_otp_email(
             to_email=user.email,
@@ -195,7 +191,6 @@ def send_verification_otp(user: User, db: Session):
         return success
         
     except Exception as e:
-        print(f"خطأ في إرسال رمز التحقق: {str(e)}")
         return False
 
 
@@ -229,28 +224,28 @@ def generate_user_tokens(user: User, db: Session) -> Token:
         "avatar": user.avatar
     }
     
-    # إضافة نوع الملف الشخصي
     if user.user_type == "student":
         user_data["profile_type"] = "student"
     elif user.user_type == "academy":
         user_data["profile_type"] = "academy"
     
-    return Token(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        token_type="bearer",
-        user_type=user.user_type,
-        status="success",
+    return create_unified_success_response(
+        data={
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "token_type": "bearer",
+            "user_type": user.user_type,
+            "user_data": user_data
+        },
+        message="تم إنشاء الحساب وتوليد التوكن بنجاح" if not user.is_verified else "تم تسجيل الدخول بنجاح",
         status_code=201,
-        timestamp=get_current_timestamp(),
-        user_data=user_data
+        path="/api/v1/auth/login"
     )
 
 
 def generate_verification_token(user_id: int, email: str, purpose: str = "password_reset") -> str:
-    """إنشاء verification token"""
+    """ verification token"""
     token = f"ver_{secrets.token_hex(16)}"
-    expires_at = datetime.utcnow() + timedelta(minutes=5)  # 5 دقائق صلاحية
     
     _verification_tokens[token] = {
         "user_id": user_id,
@@ -271,9 +266,7 @@ def verify_verification_token(token: str) -> Tuple[bool, Optional[Dict], Optiona
     
     token_data = _verification_tokens[token]
     
-    # فحص انتهاء الصلاحية
     if datetime.utcnow() > token_data["expires_at"]:
-        # حذف التوكن المنتهي الصلاحية
         del _verification_tokens[token]
         return False, None, "انتهت صلاحية التوكن"
     
@@ -281,7 +274,7 @@ def verify_verification_token(token: str) -> Tuple[bool, Optional[Dict], Optiona
 
 
 def invalidate_verification_token(token: str) -> bool:
-    """إلغاء verification token بعد الاستخدام"""
+    """ verification token  """
     if token in _verification_tokens:
         del _verification_tokens[token]
         return True

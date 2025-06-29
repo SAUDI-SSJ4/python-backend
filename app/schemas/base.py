@@ -44,23 +44,26 @@ class BaseLogin(BaseModel):
 
 
 class BaseResponse(BaseModel):
-    """Base response schema"""
-    message: str = Field(..., description="Response message")
-    status: str = Field(default="success", description="Response status")
-    status_code: Optional[int] = Field(default=200, description="HTTP status code")
-    timestamp: Optional[str] = Field(default=None, description="Response timestamp")
+    """Unified API response schema (success or error)"""
+    status: str = Field(..., description="Request result: success | error")
+    status_code: int = Field(..., description="HTTP status code")
+    message: str = Field(..., description="Human-readable message")
+    error_type: Optional[str] = Field(None, description="Error category when status=error")
+    data: Optional[Dict[str, Any]] = Field(None, description="Payload for success responses")
+    path: Optional[str] = Field(None, description="Request path")
+    timestamp: str = Field(default_factory=lambda: datetime.utcnow().isoformat(), description="Timestamp ISO 8601")
 
 
 class MessageResponse(BaseResponse):
-    """Generic message response"""
-    data: Optional[Dict[str, Any]] = Field(default=None, description="Optional response data")
-    
+    """Generic message response (inherits unified fields)"""
     model_config = {
         "json_schema_extra": {
             "example": {
-                "message": "Operation completed successfully",
                 "status": "success",
-                "data": {}
+                "status_code": 200,
+                "message": "Operation completed successfully",
+                "data": {},
+                "timestamp": "2025-06-29T13:20:00.123456"
             }
         }
     }

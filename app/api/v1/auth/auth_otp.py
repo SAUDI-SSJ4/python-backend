@@ -12,11 +12,9 @@ from app.deps import get_db
 from app.schemas import (
     Token,
     OTPRequest,
-    OTPVerify,
-    MessageResponse,
-    OTPResponse,
-    OTPStatusResponse
+    OTPVerify
 )
+from app.schemas.base import BaseResponse
 from app.models.user import User, UserStatus
 from app.models.otp import OTPPurpose
 from app.services.otp_service import OTPService
@@ -25,7 +23,8 @@ from .auth_utils import (
     generate_user_tokens, 
     get_current_timestamp,
     create_unified_error_response,
-    create_validation_error_response
+    create_validation_error_response,
+    create_unified_success_response
 )
 
 router = APIRouter()
@@ -34,42 +33,16 @@ router = APIRouter()
 
 
 
-@router.post("/request", response_model=OTPResponse, tags=["OTP"])
+@router.post("/request", response_model=BaseResponse, response_model_exclude_none=True, tags=["OTP"])
 def request_otp(
     otp_request: OTPRequest = Body(...),
     db: Session = Depends(get_db)
 ) -> Any:
     """
-    طلب رمز التحقق (OTP) مع دعم شامل لجميع الأغراض
     
-    ## الأغراض المدعومة:
-    
-    ### أغراض التحقق الأساسية:
-    - `email_verification`: تحقق من البريد الإلكتروني
-    - `phone_verification`: تحقق من رقم الهاتف
-    - `account_activation`: تفعيل الحساب
-    
-    ### أغراض الأمان:
-    - `login`: تسجيل الدخول
-    - `password_reset`: إعادة تعيين كلمة المرور
-    - `change_password`: تغيير كلمة المرور
-    - `two_factor_auth`: المصادقة الثنائية
-    - `security_verification`: التحقق الأمني
-    
-    ### أغراض التحديث:
-    - `email_update`: تحديث البريد الإلكتروني
-    - `phone_update`: تحديث رقم الهاتف
-    
-    ### أغراض المعاملات:
-    - `transaction_confirmation`: تأكيد المعاملة
-    - `payment_confirmation`: تأكيد الدفع
-    
-    ### أغراض الحساب:
-    - `account_deletion`: حذف الحساب
     """
     
     try:
-        # البحث عن المستخدم
         user = None
         if otp_request.email:
             user = db.query(User).filter(User.email == otp_request.email).first()
@@ -101,7 +74,6 @@ def request_otp(
                 )
             )
         
-        # التحقق من صحة الغرض
         try:
             purpose = OTPPurpose(otp_request.purpose)
         except ValueError:
@@ -135,7 +107,6 @@ def request_otp(
                 )
             )
         
-        # التحقق من حالة المستخدم للعمليات الحساسة
         sensitive_purposes = [
             OTPPurpose.ACCOUNT_DELETION,
             OTPPurpose.PAYMENT_CONFIRMATION,
@@ -166,7 +137,6 @@ def request_otp(
                 )
             )
         
-        # إنشاء OTP
         print(f"إنشاء OTP للمستخدم {user.id} للغرض {purpose.value}")
         try:
             otp = OTPService.create_otp(
@@ -202,12 +172,10 @@ def request_otp(
                 )
             )
         
-        # إرسال OTP
         print(f" محاولة إرسال OTP إلى {user.email or user.phone_number}")
         try:
             user_name = f"{user.fname} {user.lname}".strip() or "مستخدم"
             
-            # تحديد طريقة الإرسال
             if otp_request.email:
                 success = OTPService.send_otp_email(
                     email=user.email,
@@ -230,24 +198,26 @@ def request_otp(
             print(f" استثناء أثناء الإرسال: {str(e)}")
             success = False
         
-        # إعداد الاستجابة
         if success:
-            # الحصول على عدد المحاولات المسموحة
             max_attempts = OTPService.MAX_ATTEMPTS.get(purpose, 3)
             expiry_minutes = OTPService.EXPIRY_MINUTES.get(purpose, 10)
             
-            return OTPResponse(
-                message=f"تم إرسال رمز التحقق بنجاح للغرض: {OTPService.get_purpose_description(purpose)}",
-                status="success",
-                expires_in=expiry_minutes * 60,  # بالثواني
-                attempts_remaining=max_attempts,
-                purpose=purpose.value,
-                sent_to=sent_to,
-                expires_at=otp.expires_at.isoformat(),
-                timestamp=get_current_timestamp()
+            return create_unified_success_response(
+                data={
+                    "message": f"تم إرسال رمز التحقق بنجاح للغرض: {OTPService.get_purpose_description(purpose)}",
+                    "status": "success",
+                    "expires_in": expiry_minutes * 60,  # بالثواني
+                    "attempts_remaining": max_attempts,
+                    "purpose": purpose.value,
+                    "sent_to": sent_to,
+                    "expires_at": otp.expires_at.isoformat(),
+                    "timestamp": get_current_timestamp()
+                },
+                message="تم إرسال رمز التحقق بنجاح",
+                status_code=200,
+                path="/api/v1/auth/otp/request"
             )
         else:
-            # حذف OTP إذا فشل الإرسال
             db.delete(otp)
             db.commit()
             
@@ -303,19 +273,15 @@ def request_otp(
         )
 
 
-@router.post("/verify", response_model=Token, tags=["OTP"])
+@router.post("/verify", response_model=BaseResponse, response_model_exclude_none=True, tags=["OTP"])
 def verify_otp(
     otp_verify: OTPVerify = Body(...),
     db: Session = Depends(get_db)
 ) -> Any:
-    """
-    التحقق من رمز OTP مع دعم شامل لجميع الأغراض
     
-    يدعم التحقق من جميع أنواع OTP مع ميزات أمان متقدمة
-    """
+
     
     try:
-        # البحث عن المستخدم
         user = None
         if otp_verify.email:
             user = db.query(User).filter(User.email == otp_verify.email).first()
@@ -323,7 +289,6 @@ def verify_otp(
             user = db.query(User).filter(User.phone_number == otp_verify.phone).first()
         
         if not user:
-            # رسالة مثل ملف الرسالة المرفق
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=create_unified_error_response(
@@ -346,7 +311,6 @@ def verify_otp(
                 )
             )
         
-        # البحث عن أي OTP صالح للمستخدم (بغض النظر عن الغرض)
         from app.models.otp import OTP
         from datetime import datetime
         
@@ -358,7 +322,6 @@ def verify_otp(
         ).first()
         
         if not otp_record:
-            # رسالة مثل ملف الرسالة المرفق
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=create_unified_error_response(
@@ -381,7 +344,6 @@ def verify_otp(
                 )
             )
         
-        # تحديث OTP كمستخدم
         otp_record.is_used = True
         otp_record.attempts += 1
         db.commit()
@@ -389,22 +351,25 @@ def verify_otp(
         success = True
         purpose = OTPPurpose(otp_record.purpose)
 
-        # تحديث حالة التحقق إذا لزم الأمر
         if purpose == OTPPurpose.EMAIL_VERIFICATION and not user.verified:
             user.verified = True
             if user.status == "pending_verification":
                 user.status = "active"
             db.commit()
         elif purpose == OTPPurpose.PHONE_VERIFICATION:
-            # TODO: إضافة حقل phone_verified إلى User model
             pass
         elif purpose == OTPPurpose.ACCOUNT_ACTIVATION:
             user.status = "active"
             user.verified = True
             db.commit()
         
-        # إنشاء tokens للمستخدم
-        return generate_user_tokens(user, db)
+        tokens = generate_user_tokens(user, db)
+        return create_unified_success_response(
+            data=tokens,
+            message="تم التحقق من OTP وتوليد التوكنات بنجاح",
+            status_code=200,
+            path="/api/v1/auth/otp/verify"
+        )
         
     except HTTPException:
         raise

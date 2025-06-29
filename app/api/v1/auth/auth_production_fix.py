@@ -48,7 +48,6 @@ async def production_register(
     email: str = Form(..., description="البريد الإلكتروني"),
     phone_number: str = Form(..., description="رقم الهاتف"),
     password: str = Form(..., description="كلمة المرور"),
-    password_confirm: str = Form(..., description="تأكيد كلمة المرور"),
     user_type: str = Form(..., description="نوع المستخدم (student/academy)"),
     avatar: Optional[UploadFile] = File(None, description="صورة الملف الشخصي"),
     db: Session = Depends(get_db)
