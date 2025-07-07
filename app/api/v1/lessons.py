@@ -21,12 +21,15 @@ from app.schemas.lesson import (
     LessonProgressUpdate,
     LessonProgressResponse
 )
-from app.services.file_service import upload_video_file
+from app.services.file_service import FileService
+from app.services.video_streaming import VideoStreamingService
 
 router = APIRouter()
+file_service = FileService()
 
-@router.post("/", response_model=LessonResponse)
+@router.post("/{chapter_id}", response_model=LessonResponse)
 async def create_lesson(
+    chapter_id: str,
     lesson_data: LessonCreate,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_academy_user)
@@ -36,7 +39,7 @@ async def create_lesson(
     """
     # التحقق من وجود الفصل والصلاحية
     chapter = db.query(Chapter).filter(
-        Chapter.id == lesson_data.chapter_id
+        Chapter.id == chapter_id
     ).first()
     
     if not chapter:
@@ -59,7 +62,7 @@ async def create_lesson(
     
     # إنشاء الدرس
     lesson = Lesson(
-        chapter_id=lesson_data.chapter_id,
+        chapter_id=chapter_id,
         course_id=chapter.course_id,
         title=lesson_data.title,
         description=lesson_data.description,
@@ -212,7 +215,7 @@ async def upload_lesson_video(
         )
     
     # رفع الفيديو
-    video_path = await upload_video_file(video_file, current_user.id)
+    video_path = await file_service.save_any_file(video_file, subfolder="lessons")
     
     # إنشاء سجل الفيديو
     video = Video(

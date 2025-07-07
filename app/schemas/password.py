@@ -123,4 +123,19 @@ class OTPVerificationResponse(BaseModel):
                 "expires_in": 300
             }
         }
+    }
+
+
+class PasswordForgotRequest(BaseModel):
+    """Password reset link request schema"""
+    email: EmailStr = Field(..., description="Email address")
+    redirect_url: str = Field(..., description="Frontend URL that will handle the reset, e.g. https://example.com/reset-password")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "email": "user@example.com",
+                "redirect_url": "https://frontend.example.com/reset-password"
+            }
+        }
     } 

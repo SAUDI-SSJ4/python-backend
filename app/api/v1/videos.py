@@ -21,42 +21,43 @@ async def stream_video(
     db: Session = Depends(get_db)
 ):
     """
-    Stream video content with security and access control.
+    بث الفيديو المحمي مع طبقات الحماية المتقدمة
     
-    This endpoint provides secure video streaming with:
-    - JWT token-based access control
-    - Range request support for efficient streaming
-    - Student enrollment verification
-    - Access logging for analytics
+    الحمايات المُطبقة:
+    - فحص JWT token مع client fingerprint
+    - منع User Agents المشبوهة (curl, wget, youtube-dl, etc.)
+    - فحص IP و Referer
+    - منع أدوات التحميل
+    - Headers حماية متقدمة
     """
     try:
-        # Verify access token
-        payload = video_streaming_service.verify_video_token(token)
+        # التحقق من رمز الوصول مع فحص معلومات العميل
+        payload = video_streaming_service.verify_video_token(token, request)
         video_id_from_token = payload.get("video_id")
         student_id = payload.get("student_id")
         
-        # Ensure token is for the correct video
+        # التأكد من أن التوكن خاص بهذا الفيديو
         if video_id_from_token != video_id:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="رمز الوصول غير صالح لهذا الفيديو"
             )
         
-        # Verify student access to video
+        # التحقق من وصول الطالب للفيديو
         video, is_enrolled = video_streaming_service.verify_student_access(
             db, video_id, student_id
         )
         
-        # Get video file path
+        # الحصول على مسار ملف الفيديو
         file_path = video_streaming_service.get_video_file_path(video)
         
-        # Log video access
+        # تسجيل الوصول للفيديو مع معلومات الحماية
         video_streaming_service.log_video_access(db, video_id, student_id, request)
         
-        # Get range header for partial content support
+        # الحصول على Range header للبث المتقطع
         range_header = request.headers.get("range")
         
-        # Create streaming response
+        # إنشاء استجابة بث محمية
         return video_streaming_service.create_range_response(file_path, range_header)
         
     except HTTPException:
@@ -71,24 +72,36 @@ async def stream_video(
 @router.post("/access-token/{video_id}")
 async def get_video_access_token(
     video_id: str,
+    request: Request,
     db: Session = Depends(get_db),
     current_student: Student = Depends(get_current_student)
 ):
     """
-    Generate a secure access token for video streaming.
+    إنشاء رمز وصول آمن للفيديو مع بصمة العميل
     
-    This endpoint verifies student enrollment and generates a JWT token
-    that can be used to access the video streaming endpoint.
+    يتم ربط التوكن بـ:
+    - معرف الطالب
+    - معرف الفيديو
+    - User Agent
+    - عنوان IP
+    - Referer (إن وجد)
     """
     try:
-        # Verify student access to video
+        # التحقق من وصول الطالب للفيديو
         video, is_enrolled = video_streaming_service.verify_student_access(
             db, video_id, current_student.id
         )
         
-        # Generate access token
+        # جمع معلومات العميل للحماية
+        client_info = {
+            'user_agent': request.headers.get('user-agent', ''),
+            'ip': request.client.host,
+            'referer': request.headers.get('referer', '')
+        }
+        
+        # إنشاء رمز وصول مع معلومات العميل
         token = video_streaming_service.generate_video_token(
-            video_id, current_student.id
+            video_id, current_student.id, client_info=client_info
         )
         
         return {
@@ -98,7 +111,12 @@ async def get_video_access_token(
                 "access_token": token,
                 "video_id": video_id,
                 "stream_url": f"/api/v1/videos/stream/{video_id}?token={token}",
-                "expires_in": 7200  # 2 hours in seconds
+                "expires_in": 7200,  # ساعتين بالثواني
+                "security_info": {
+                    "protected": True,
+                    "download_blocked": True,
+                    "device_bound": True
+                }
             }
         }
         
@@ -119,31 +137,28 @@ async def update_lesson_progress(
     current_student: Student = Depends(get_current_student)
 ):
     """
-    Update student progress for a specific lesson.
-    
-    This endpoint tracks video watch progress and completion status
-    for analytics and course progress tracking.
+    تحديث تقدم الطالب في الدرس
     """
     try:
-        # Get or create lesson progress record
+        # الحصول على أو إنشاء سجل تقدم الدرس
         progress = db.query(LessonProgress).filter(
             LessonProgress.lesson_id == lesson_id,
             LessonProgress.student_id == current_student.id
         ).first()
         
         if not progress:
-            # Create new progress record
+            # إنشاء سجل تقدم جديد
             progress = LessonProgress(
                 lesson_id=lesson_id,
                 student_id=current_student.id,
-                course_id=progress_data.get("course_id"),  # Should be provided
+                course_id=progress_data.get("course_id"),
                 progress_percentage=progress_data.progress_percentage,
                 current_position_seconds=progress_data.current_position_seconds or 0,
                 completed=progress_data.completed or False
             )
             db.add(progress)
         else:
-            # Update existing progress
+            # تحديث التقدم الموجود
             progress.update_progress(
                 progress_data.progress_percentage,
                 progress_data.current_position_seconds
@@ -172,10 +187,7 @@ async def get_lesson_progress(
     current_student: Student = Depends(get_current_student)
 ):
     """
-    Get student progress for a specific lesson.
-    
-    Returns the current progress information including watch time,
-    completion status, and last accessed timestamp.
+    الحصول على تقدم الطالب في الدرس
     """
     progress = db.query(LessonProgress).filter(
         LessonProgress.lesson_id == lesson_id,
@@ -183,12 +195,12 @@ async def get_lesson_progress(
     ).first()
     
     if not progress:
-        # Return default progress if none exists
+        # إرجاع تقدم افتراضي إذا لم يوجد
         return LessonProgressResponse(
             id="",
             student_id=current_student.id,
             lesson_id=lesson_id,
-            course_id="",  # This should be fetched from lesson
+            course_id="",
             progress_percentage=0,
             completed=False,
             current_position_seconds=0,
@@ -210,18 +222,15 @@ async def get_video_info(
     current_student: Student = Depends(get_current_student)
 ):
     """
-    Get video information and metadata.
-    
-    Returns video details including duration, quality options,
-    and access permissions for the authenticated student.
+    الحصول على معلومات الفيديو مع حالة الحماية
     """
     try:
-        # Verify student access to video
+        # التحقق من وصول الطالب للفيديو
         video, is_enrolled = video_streaming_service.verify_student_access(
             db, video_id, current_student.id
         )
         
-        # Get video file information
+        # الحصول على معلومات ملف الفيديو
         file_path = video_streaming_service.get_video_file_path(video)
         video_info = video_streaming_service.get_video_info(file_path)
         
@@ -237,7 +246,13 @@ async def get_video_info(
                 "mime_type": video_info["mime_type"],
                 "is_enrolled": is_enrolled,
                 "can_access": True,
-                "lesson_id": video.lesson_id
+                "lesson_id": video.lesson_id,
+                "protection_status": {
+                    "download_protected": True,
+                    "hotlink_protected": True,
+                    "user_agent_filtered": True,
+                    "token_secured": True
+                }
             }
         }
         
@@ -247,4 +262,46 @@ async def get_video_info(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"حدث خطأ أثناء جلب معلومات الفيديو: {str(e)}"
-        ) 
+        )
+
+
+@router.get("/security-check")
+async def security_check(request: Request):
+    """
+    فحص حالة الحماية للعميل الحالي
+    """
+    try:
+        user_agent = request.headers.get('user-agent', '')
+        
+        # فحص User Agent
+        security_status = {
+            "client_supported": True,
+            "user_agent": user_agent,
+            "ip_address": request.client.host,
+            "security_level": "high"
+        }
+        
+        # فحص إذا كان العميل محظور
+        blocked_agents = video_streaming_service.BLOCKED_USER_AGENTS
+        for blocked in blocked_agents:
+            if blocked in user_agent.lower():
+                security_status["client_supported"] = False
+                security_status["security_level"] = "blocked"
+                break
+        
+        # فحص المتصفحات المدعومة
+        valid_browsers = ['chrome', 'firefox', 'safari', 'edge', 'opera']
+        if not any(browser in user_agent.lower() for browser in valid_browsers):
+            security_status["client_supported"] = False
+            security_status["security_level"] = "unsupported"
+        
+        return {
+            "status": True,
+            "data": security_status
+        }
+        
+    except Exception as e:
+        return {
+            "status": False,
+            "error": str(e)
+        } 

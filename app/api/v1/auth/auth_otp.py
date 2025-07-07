@@ -24,7 +24,8 @@ from .auth_utils import (
     get_current_timestamp,
     create_unified_error_response,
     create_validation_error_response,
-    create_unified_success_response
+    create_unified_success_response,
+    generate_verification_token
 )
 
 router = APIRouter()
@@ -177,11 +178,11 @@ def request_otp(
             user_name = f"{user.fname} {user.lname}".strip() or "مستخدم"
             
             if otp_request.email:
-                success = OTPService.send_otp_email(
-                    email=user.email,
-                    code=otp.code,
-                    purpose=purpose.value,
-                    user_name=user_name
+                success = email_service.send_otp_email(
+                    to_email=user.email,
+                    user_name=user_name,
+                    otp_code=otp.code,
+                    purpose=purpose.value
                 )
                 sent_to = f"{user.email[:3]}***@{user.email.split('@')[1]}" if user.email else None
             else:
@@ -363,6 +364,34 @@ def verify_otp(
             user.verified = True
             db.commit()
         
+        # دعم عملية إعادة تعيين كلمة المرور
+        if purpose == OTPPurpose.PASSWORD_RESET:
+            if user.account_type != "local":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=create_unified_error_response(
+                        status_code=400,
+                        error_code="invalid_account_type",
+                        message="إعادة تعيين كلمة المرور متاحة فقط للحسابات المحلية",
+                        path="/api/v1/auth/otp/verify"
+                    )
+                )
+            verification_token = generate_verification_token(
+                user_id=user.id,
+                email=user.email,
+                purpose="password_reset"
+            )
+            return create_unified_success_response(
+                data={
+                    "verification_token": verification_token,
+                    "expires_in": 300
+                },
+                message="تم التحقق من OTP بنجاح. استخدم التوكن لإعادة تعيين كلمة المرور",
+                status_code=200,
+                path="/api/v1/auth/otp/verify"
+            )
+        
+        # الأغراض الأخرى تُرجع JWT
         tokens = generate_user_tokens(user, db)
         return create_unified_success_response(
             data=tokens,

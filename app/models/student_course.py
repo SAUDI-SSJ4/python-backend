@@ -54,9 +54,9 @@ class StudentCourse(Base):
     # Soft delete
     deleted_at = Column(DateTime, nullable=True)
     
-    # Relationships - معلقة مؤقتاً لحل مشاكل التسجيل
-    # student = relationship("Student", back_populates="course_enrollments")
-    # course = relationship("Course", back_populates="student_enrollments")
+    # Relationships
+    student = relationship("Student", back_populates="course_enrollments")
+    course = relationship("Course", back_populates="student_enrollments")
     
     def __repr__(self):
         return f"<StudentCourse(student_id={self.student_id}, course_id={self.course_id}, status='{self.status}')>"

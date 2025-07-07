@@ -5,7 +5,14 @@ from passlib.context import CryptContext
 from fastapi.security import HTTPBearer
 from app.core.config import settings
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# محاولة تهيئة «bcrypt». إذا فشلت (مثلاً لعدم توافق libbcrypt) ننتقل إلى خوارزمية آمنة بديلة.
+try:
+    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+except Exception as e:  # pragma: no cover
+    import logging
+    logging.warning(f"⚠️ تعذّر تحميل bcrypt، سيتم استخدام pbkdf2_sha256 مؤقتاً: {e}")
+    pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
+
 oauth2_scheme = HTTPBearer()
 
 ALGORITHM = settings.ALGORITHM

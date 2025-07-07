@@ -15,6 +15,7 @@ class FileService:
         self.academy_logos_dir = self.upload_dir / "academy" / "logos"
         self.academy_covers_dir = self.upload_dir / "academy" / "covers"
         self.profile_images_dir = self.upload_dir / "profiles"
+        self.courses_dir = self.upload_dir / "courses"
         
         # Create directories if they don't exist
         self._create_directories()
@@ -31,6 +32,7 @@ class FileService:
         self.logo_size = (400, 400)
         self.cover_size = (1200, 300)
         self.profile_size = (200, 200)
+        self.course_image_size = (800, 450)  # 16:9 aspect ratio for course images
     
     def _create_directories(self):
         """Create required directories"""
@@ -38,7 +40,8 @@ class FileService:
             self.upload_dir,
             self.academy_logos_dir,
             self.academy_covers_dir,
-            self.profile_images_dir
+            self.profile_images_dir,
+            self.courses_dir
         ]
         
         for directory in directories:
@@ -188,6 +191,35 @@ class FileService:
                 detail=f"File upload failed: {str(e)}"
             )
     
+    async def upload_course_image(self, file: UploadFile, course_id: int) -> str:
+        """Upload course image"""
+        self._validate_file(file)
+        
+        # Generate filename
+        filename = self._generate_filename(file.filename)
+        file_path = self.courses_dir / filename
+        
+        try:
+            # Save file
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+            
+            # Resize image
+            self._resize_image(file_path, self.course_image_size, crop=False)
+            
+            # Return relative path for static serving
+            return f"static/uploads/courses/{filename}"
+            
+        except Exception as e:
+            # Delete file on error
+            if file_path.exists():
+                file_path.unlink()
+            
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"File upload failed: {str(e)}"
+            )
+    
     def delete_file(self, file_path: str) -> bool:
         """Delete file"""
         try:
@@ -208,6 +240,61 @@ class FileService:
             return f"{base_url}/static/uploads/{file_path}"
         else:
             return f"/static/uploads/{file_path}"
+    
+    async def save_file(self, file: UploadFile, subfolder: str = "general") -> str:
+        """Save file to subfolder and return relative path"""
+        self._validate_file(file)
+        
+        # Create subfolder directory
+        subfolder_dir = self.upload_dir / subfolder
+        subfolder_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Generate filename
+        filename = self._generate_filename(file.filename)
+        file_path = subfolder_dir / filename
+        
+        try:
+            # Reset file cursor to beginning
+            await file.seek(0)
+            
+            # Save file
+            with open(file_path, "wb") as buffer:
+                contents = await file.read()
+                buffer.write(contents)
+            
+            # Return relative path
+            return f"{subfolder}/{filename}"
+            
+        except Exception as e:
+            # Delete file on error
+            if file_path.exists():
+                file_path.unlink()
+            
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"File upload failed: {str(e)}"
+            )
+
+    async def save_any_file(self, file: UploadFile, subfolder: str = "general") -> str:
+        """Save any file (no content-type validation) and return relative path"""
+        # Create subfolder directory
+        subfolder_dir = self.upload_dir / subfolder
+        subfolder_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generate filename
+        filename = self._generate_filename(file.filename)
+        file_path = subfolder_dir / filename
+
+        try:
+            await file.seek(0)
+            with open(file_path, "wb") as buffer:
+                contents = await file.read()
+                buffer.write(contents)
+            return f"{subfolder}/{filename}"
+        except Exception as e:
+            if file_path.exists():
+                file_path.unlink()
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"File upload failed: {str(e)}")
 
 
 # Create singleton service instance

@@ -3,6 +3,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
+import pytz
 
 
 # Enums for validation
@@ -81,9 +82,18 @@ class CourseBase(BaseModel):
 
     @validator('discount_ends_at')
     def validate_discount_end_date(cls, v):
-        """Validate discount end date is in the future"""
-        if v is not None and v <= datetime.utcnow():
-            raise ValueError('تاريخ انتهاء الخصم يجب أن يكون في المستقبل')
+        """Validate discount end date is in the future - Updated"""
+        if v is not None:
+            # التعامل الصحيح مع التواريخ بنوعيها timezone-aware و timezone-naive
+            if v.tzinfo is not None:
+                # إذا كان التاريخ timezone-aware
+                current_time = datetime.now(pytz.UTC)
+            else:
+                # إذا كان التاريخ timezone-naive
+                current_time = datetime.utcnow()
+            
+            if v <= current_time:
+                raise ValueError('تاريخ انتهاء الخصم يجب أن يكون في المستقبل')
         return v
 
     @validator('url')
@@ -97,7 +107,8 @@ class CourseBase(BaseModel):
 class CourseCreate(CourseBase):
     """Schema for creating a new course"""
     category_id: int = Field(..., gt=0, description="Category ID")
-    trainer_id: int = Field(..., gt=0, description="Trainer user ID")
+    trainer_id: Optional[int] = Field(None, description="Trainer user ID (optional)")
+    product_id: Optional[int] = Field(None, gt=0, description="Product ID (optional)")
     image: str = Field(..., description="Course main image path")
     gallery: Optional[List[str]] = Field(None, description="Gallery image paths")
     preview_video: Optional[str] = Field(None, description="Preview video path")
@@ -108,6 +119,7 @@ class CourseCreate(CourseBase):
             "example": {
                 "category_id": 1,
                 "trainer_id": 2,
+                "product_id": 1,
                 "title": "دورة تطوير الويب الشاملة",
                 "content": "دورة شاملة في تطوير المواقع الإلكترونية باستخدام أحدث التقنيات",
                 "short_content": "تعلم تطوير المواقع من الصفر",
@@ -141,34 +153,137 @@ class CourseUpdate(BaseModel):
     image: Optional[str] = None
     gallery: Optional[List[str]] = None
     preview_video: Optional[str] = None
+    product_id: Optional[int] = Field(None, gt=0, description="Product ID")
 
 
-class CourseResponse(CourseBase):
+class CourseResponse(BaseModel):
     """Schema for course response"""
     id: str
     academy_id: int
     category_id: int
-    trainer_id: int
+    trainer_id: Optional[int] = None
     slug: str
     image: str
+    content: str
+    short_content: str
+    preparations: Optional[str] = None
+    requirements: Optional[str] = None
+    learning_outcomes: Optional[str] = None
     gallery: Optional[List[str]] = None
     preview_video: Optional[str] = None
-    status: CourseStatusEnum
+    course_state: str  # course_state بدلاً من status
+    featured: bool
+    type: str
+    level: str
+    url: Optional[str] = None
     platform_fee_percentage: Decimal
     avg_rating: Decimal
     ratings_count: int
     students_count: int
     lessons_count: int
-    duration_seconds: int
     completion_rate: Decimal
     created_at: datetime
     updated_at: datetime
+    
+    # Properties that come from Product relationship
+    title: str
+    price: Decimal
+    discount_price: Optional[Decimal] = None
+    discount_ends_at: Optional[datetime] = None
 
     # Computed properties
-    current_price: Decimal
-    duration_formatted: str
-    is_published: bool
-    is_free: bool
+    @property
+    def current_price(self) -> Decimal:
+        """Get current effective price (considering discounts)"""
+        if self.discount_price and self.discount_ends_at:
+            if datetime.utcnow() < self.discount_ends_at:
+                return self.discount_price
+        return self.price
+    
+    @property
+    def duration_formatted(self) -> str:
+        return "N/A"
+    
+    @property
+    def is_published(self) -> bool:
+        """Check if the course is published"""
+        return self.course_state == "published"
+    
+    @property
+    def is_free(self) -> bool:
+        """Check if the course is free"""
+        return self.price <= 0
+
+    @classmethod
+    def from_course_model(cls, course):
+        """Convert course model to response schema"""
+        from app.core.config import settings
+        from decimal import Decimal
+        from datetime import datetime
+        # Get product data
+        product_data = {
+            "title": course.product.title if getattr(course, 'product', None) and course.product else "",
+            "price": course.product.price if getattr(course, 'product', None) and course.product and course.product.price is not None else Decimal('0.00'),
+            "discount_price": course.product.discount_price if getattr(course, 'product', None) and course.product else None,
+            "discount_ends_at": course.product.discount_ends_at if getattr(course, 'product', None) and course.product else None
+        }
+        # Ensure image path starts with /static/uploads/
+        image_path = course.image if getattr(course, 'image', None) else ""
+        if image_path and not image_path.startswith('/static/uploads/'):
+            if image_path.startswith('static/uploads/'):
+                image_path = '/' + image_path
+            else:
+                image_path = f'/static/uploads/{image_path}'
+        # Convert preview video path
+        preview_video_path = course.preview_video if getattr(course, 'preview_video', None) else None
+        if preview_video_path and not preview_video_path.startswith('/static/uploads/'):
+            if preview_video_path.startswith('static/uploads/'):
+                preview_video_path = '/' + preview_video_path
+            else:
+                preview_video_path = f'/static/uploads/{preview_video_path}'
+        # Convert gallery paths if they exist
+        gallery_paths = None
+        if getattr(course, 'gallery', None):
+            gallery_paths = []
+            for path in course.gallery:
+                if path and not path.startswith('/static/uploads/'):
+                    if path.startswith('static/uploads/'):
+                        gallery_paths.append('/' + path)
+                    else:
+                        gallery_paths.append(f'/static/uploads/{path}')
+                else:
+                    gallery_paths.append(path)
+        # Create response data
+        response_data = {
+            "id": getattr(course, 'id', ""),
+            "academy_id": getattr(course, 'academy_id', 0),
+            "category_id": getattr(course, 'category_id', 0),
+            "trainer_id": getattr(course, 'trainer_id', None),
+            "slug": getattr(course, 'slug', ""),
+            "image": image_path,
+            "content": getattr(course, 'content', ""),
+            "short_content": getattr(course, 'short_content', ""),
+            "preparations": getattr(course, 'preparations', None),
+            "requirements": getattr(course, 'requirements', None),
+            "learning_outcomes": getattr(course, 'learning_outcomes', None),
+            "gallery": gallery_paths,
+            "preview_video": preview_video_path,
+            "course_state": getattr(course, 'course_state', "draft"),
+            "featured": getattr(course, 'featured', False),
+            "type": getattr(course, 'type', "recorded"),
+            "level": getattr(course, 'level', "beginner"),
+            "url": getattr(course, 'url', None),
+            "platform_fee_percentage": getattr(course, 'platform_fee_percentage', Decimal('0.00')),
+            "avg_rating": getattr(course, 'avg_rating', Decimal('0.00')),
+            "ratings_count": getattr(course, 'ratings_count', 0),
+            "students_count": getattr(course, 'students_count', 0),
+            "lessons_count": getattr(course, 'lessons_count', 0),
+            "completion_rate": getattr(course, 'completion_rate', Decimal('0.00')),
+            "created_at": getattr(course, 'created_at', datetime.utcnow()),
+            "updated_at": getattr(course, 'updated_at', datetime.utcnow()),
+            **product_data
+        }
+        return cls(**response_data)
 
     class Config:
         """Pydantic configuration for ORM compatibility"""
@@ -198,12 +313,60 @@ class CourseDetailResponse(CourseResponse):
     trainer: Optional[Dict[str, Any]] = None
     chapters: Optional[List[Dict[str, Any]]] = None
 
+    @classmethod
+    def from_course_model(cls, course, chapters=None):
+        """Create CourseDetailResponse from Course model with product relationship"""
+        base_data = super().from_course_model(course)
+        base_dict = base_data.dict()
+        response_data = base_dict.copy()
+        # Add category data if available
+        if hasattr(course, 'category') and course.category:
+            response_data['category'] = {
+                'id': getattr(course.category, 'id', 0),
+                'title': getattr(course.category, 'title', ""),
+                'slug': getattr(course.category, 'slug', ""),
+                'content': getattr(course.category, 'content', ""),
+                'image': getattr(course.category, 'image', None),
+                'status': getattr(course.category, 'status', None)
+            }
+        else:
+            response_data['category'] = None
+        # Add trainer data if available
+        if hasattr(course, 'trainer') and course.trainer:
+            response_data['trainer'] = {
+                'id': getattr(course.trainer, 'id', 0),
+                'fname': getattr(course.trainer, 'fname', ""),
+                'lname': getattr(course.trainer, 'lname', ""),
+                'email': getattr(course.trainer, 'email', ""),
+                'avatar': getattr(course.trainer, 'avatar', None),
+                'user_type': getattr(course.trainer, 'user_type', None)
+            }
+        else:
+            response_data['trainer'] = None
+        # Add chapters data if provided
+        if chapters:
+            response_data['chapters'] = [
+                {
+                    'id': getattr(chapter, 'id', 0),
+                    'title': getattr(chapter, 'title', ""),
+                    'description': getattr(chapter, 'description', ""),
+                    'order_number': getattr(chapter, 'order_number', 0),
+                    'is_published': getattr(chapter, 'is_published', False),
+                    'created_at': getattr(chapter, 'created_at', None)
+                }
+                for chapter in chapters
+            ]
+        else:
+            response_data['chapters'] = None
+        return cls(**response_data)
+
     class Config:
         from_attributes = True
 
 
 class CourseFilters(BaseModel):
     """Schema for course filtering and search"""
+    academy_id: Optional[int] = Field(None, description="Filter by academy")
     category_id: Optional[int] = Field(None, description="Filter by category")
     trainer_id: Optional[int] = Field(None, description="Filter by trainer")
     status: Optional[CourseStatusEnum] = Field(None, description="Filter by status")

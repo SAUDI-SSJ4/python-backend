@@ -12,26 +12,32 @@ from fastapi.responses import RedirectResponse, JSONResponse
 from pathlib import Path
 from fastapi.exceptions import RequestValidationError
 from fastapi.encoders import jsonable_encoder
+from sqlalchemy import create_engine, text
+from app.db.session import engine
 
-# Import authentication router with error handling
-try:
-    from app.api.v1.auth import router as main_auth_router
-    main_auth_available = True
-    print("Successfully loaded main authentication router")
-except Exception as e:
-    main_auth_available = False
-    main_auth_router = None
-    print(f"Failed to load main authentication router: {e}")
+# Import all models to ensure they are registered with SQLAlchemy's Base.metadata
+from app.models import (
+    User, UserType, UserStatus, AccountType, Student, Gender, Academy, AcademyUser, AcademyStatus, AcademyUserRole,
+    OTP, OTPPurpose, AcademyFinance, StudentFinance, Transaction, Admin, Coupon, Course, CourseStatus, CourseType,
+    CourseLevel, Category, Product, DigitalProduct, Package, StudentProduct, ProductStatus, ProductType, PackageType,
+    Chapter, Lesson, LessonType, VideoType, Video, Cart, Invoice, InvoiceProduct, Payment, PaymentGatewayLog,
+    CouponUsage, PaymentStatus, PaymentGateway, Exam, Question, QuestionOption, QuestionType, InteractiveTool,
+    LessonProgress, StudentCourse, AIAnswer
+)
 
-# Check if we can import the auth module from the auth directory as fallback
+# Import authentication router
+from app.api.v1.auth import router as main_auth_router
+print("Successfully loaded main authentication router")
+
+# Import me router for user profile - استيراد راوتر /me للملف الشخصي
 try:
-    from app.api.v1.auth.auth_basic import router as modular_auth_router
-    auth_available = True
-    print("Successfully loaded modular authentication router")
+    from app.api.v1.me import router as me_router
+    me_available = True
+    print("Successfully loaded user profile router")
 except Exception as e:
-    auth_available = False
-    modular_auth_router = None
-    print(f"Failed to load modular authentication router: {e}")
+    me_available = False
+    me_router = None
+    print(f"Failed to load user profile router: {e}")
 
 # Import courses routers
 try:
@@ -82,7 +88,7 @@ except Exception as e:
     print(f"Failed to load students router: {e}")
 
 try:
-    from app.api.v1.academy import router as academy_router
+    from app.api.v1.academy_simplified import router as academy_router
     academy_available = True
     print("Successfully loaded academy router")
 except Exception as e:
@@ -98,6 +104,34 @@ except Exception as e:
     lessons_available = False
     lessons_router = None
     print(f"Failed to load lessons router: {e}")
+
+# Import cart and payment routers
+try:
+    from app.api.v1.cart import router as cart_router
+    cart_available = True
+    print("Successfully loaded cart router")
+except Exception as e:
+    cart_available = False
+    cart_router = None
+    print(f"Failed to load cart router: {e}")
+
+try:
+    from app.api.v1.payment import router as payment_router
+    payment_available = True
+    print("Successfully loaded payment router")
+except Exception as e:
+    payment_available = False
+    payment_router = None
+    print(f"Failed to load payment router: {e}")
+
+try:
+    from app.api.v1.categories import router as categories_router
+    categories_available = True
+    print("Successfully loaded categories router")
+except Exception as e:
+    categories_available = False
+    categories_router = None
+    print(f"Failed to load categories router: {e}")
 
 # Create static directories if they don't exist
 static_dir = Path("static")
@@ -120,7 +154,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # Configure CORS middleware for cross-origin requests
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://sayan.website", "https://sayan.pro", "http://localhost:3000", "https://fast.sayan-server.com"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -134,7 +168,7 @@ async def custom_http_exception_handler(request: Request, exc: HTTPException):
         error_content["status_code"] = exc.status_code
         if "error" in error_content and "error_type" not in error_content:
             error_content["error_type"] = error_content.pop("error")
-        allowed_keys = {"status", "status_code", "error_type", "message", "path", "timestamp", "data"}
+        allowed_keys = {"status", "status_code", "error_type", "message", "path", "timestamp", "data", "details", "exception_type", "traceback", "debug_info"}
 
         error_content.setdefault("path", str(request.url.path))
 
@@ -206,25 +240,28 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
     return JSONResponse(status_code=422, content=jsonable_encoder(error_response))
 
-# Include authentication routers
-if main_auth_available:
-    app.include_router(
-        main_auth_router,
-        prefix="/api/v1/auth"
-    )
-    print("Main authentication router registered successfully")
-    
-    if auth_available:
-        pass
+# Include authentication router
+app.include_router(
+    main_auth_router,
+    prefix="/api/v1/auth",
+    tags=["Authentication"]
+)
+print("Main authentication router registered successfully")
 
-elif auth_available:
-    pass
+# Include user profile router - تضمين راوتر الملف الشخصي
+if me_available:
+    app.include_router(
+        me_router,
+        prefix="/api/v1",
+        tags=["User Profile"]
+    )
+    print("User profile router registered successfully")
 
 # Include courses routers
 if courses_main_available:
     app.include_router(
         courses_main_router,
-        prefix="/api/v1/courses",
+        prefix="/api/v1",
         tags=["Courses Management"]
     )
     print("Courses main router registered successfully")
@@ -232,7 +269,7 @@ if courses_main_available:
 if chapters_available:
     app.include_router(
         chapters_router,
-        prefix="/api/v1/courses",
+        prefix="/api/v1",
         tags=["Chapters Management"]
     )
     print("Chapters router registered successfully")
@@ -240,7 +277,7 @@ if chapters_available:
 if public_courses_available:
     app.include_router(
         public_courses_router,
-        prefix="/api/v1/public/courses",
+        prefix="/api/v1",
         tags=["Public Courses"]
     )
     print("Public courses router registered successfully")
@@ -280,14 +317,51 @@ if lessons_available:
     )
     print("Lessons router registered successfully")
 
+# Include cart router
+if cart_available:
+    app.include_router(
+        cart_router,
+        prefix="/api/v1/cart",
+        tags=["Cart Management"]
+    )
+    print("Cart router registered successfully")
+
+# Include payment router
+if payment_available:
+    app.include_router(
+        payment_router,
+        prefix="/api/v1",
+        tags=["Payment Operations"]
+    )
+    print("Payment router registered successfully")
+
+# Include categories router
+if categories_available:
+    app.include_router(
+        categories_router,
+        prefix="/api/v1",
+        tags=["Categories"]
+    )
+    print("Categories router registered successfully")
+
+# Include debug router
+try:
+    from app.api.v1.debug import router as debug_router
+    app.include_router(
+        debug_router,
+        prefix="/api/v1",
+        tags=["Debug"]
+    )
+    print("Debug router registered successfully")
+except Exception as e:
+    print(f"Failed to load debug router: {e}")
+
 @app.get("/", summary="Root Endpoint")
 def root():
     return RedirectResponse(url="/docs")
 
 @app.get("/health", summary="Health Check")
 def health_check():
-    total_auth_available = auth_available or main_auth_available
-    
     return {
         "status": "healthy",
         "version": "2.0.0",
@@ -300,30 +374,40 @@ def health_check():
             "/api/v1/videos/* - Video streaming endpoints",
             "/api/v1/public/courses/* - Public course browsing",
             "/api/v1/students/* - Student management",
-            "/api/v1/academy/* - Academy management"
+            "/api/v1/academy/* - Academy management",
+            "/api/v1/cart/* - Shopping cart management",
+            "/api/v1/checkout/* - Payment processing",
+            "/api/v1/transaction/* - Payment verification"
         ],
-        "loaded_routers": {
-            "main_auth_router": main_auth_available,
-            "modular_auth_router": auth_available,
-            "courses_main_router": courses_main_available,
-            "chapters_router": chapters_available,
-            "public_courses_router": public_courses_available,
-            "lessons_router": lessons_available,
-            "videos_router": videos_available,
-            "students_router": students_available,
-            "academy_router": academy_available
-        },
         "features": {
-            "authentication": "Available" if total_auth_available else "Unavailable",
-            "course_management": "Available" if courses_main_available else "Unavailable",
-            "lesson_management": "Available" if lessons_available else "Unavailable",
-            "video_streaming": "Available" if videos_available else "Unavailable",
-            "chapter_management": "Available" if chapters_available else "Unavailable",
-            "public_browsing": "Available" if public_courses_available else "Unavailable",
-            "student_management": "Available" if students_available else "Unavailable",
-            "academy_management": "Available" if academy_available else "Unavailable",
+            "authentication": "Available",
+            "course_management": "Available",
+            "lesson_management": "Available", 
+            "video_streaming": "Available",
+            "chapter_management": "Available",
+            "public_browsing": "Available",
+            "student_management": "Available",
+            "academy_management": "Available",
+            "shopping_cart": "Available",
+            "payment_processing": "Available",
+            "moyasar_integration": "Available",
+            "course_enrollment": "Available",
+            "invoice_management": "Available",
+            "coupon_system": "Available",
             "otp_system": "Available",
             "email_service": "Available",
             "static_files": "Available"
         }
     }
+
+# التحقق من اتصال قاعدة البيانات فقط (الجداول موجودة مسبقاً)
+@app.on_event("startup")
+def on_startup():
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        print("✅ تم الاتصال بقاعدة البيانات fast_sayan بنجاح")
+    except Exception as e:
+        import traceback
+        print("❌ تعذّر الاتصال بقاعدة البيانات:", e)
+        print(traceback.format_exc())

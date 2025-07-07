@@ -39,34 +39,6 @@ class WithdrawalStatus(str, enum.Enum):
     COMPLETED = "completed"
 
 
-class Payment(Base):
-    __tablename__ = "payments"
-
-    id = Column(Integer, primary_key=True, index=True)
-    student_id = Column(Integer, ForeignKey("students.id"), nullable=False)
-    academy_id = Column(Integer, ForeignKey("academies.id"), nullable=True)
-    amount = Column(Float, nullable=False)
-    currency = Column(String(10), default="SAR")
-    status = Column(SQLEnum(PaymentStatus), default=PaymentStatus.PENDING)
-    payment_method = Column(SQLEnum(PaymentMethod), nullable=True)
-    transaction_id = Column(String(255), unique=True, nullable=True)
-    invoice_id = Column(String(255), unique=True, nullable=True)
-    coupon_id = Column(Integer, ForeignKey("coupons.id"), nullable=True)
-    discount_amount = Column(Float, default=0.0)
-    final_amount = Column(Float, nullable=False)
-    payment_data = Column(JSON, nullable=True)  # Store gateway response
-    paid_at = Column(DateTime(timezone=True), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-
-    # Relationships - معلق مؤقتاً لحل conflicts
-    # student = relationship("Student", back_populates="payments")
-    academy = relationship("Academy")
-    coupon = relationship("Coupon", back_populates="payments")
-    payment_rows = relationship("PaymentRow", back_populates="payment")
-    transactions = relationship("Transaction", back_populates="payment")
-
-
 class PaymentRow(Base):
     __tablename__ = "payment_rows"
 

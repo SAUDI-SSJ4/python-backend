@@ -9,8 +9,9 @@ from app.core.config import settings
 from app.deps.database import get_db
 from app.models.user import User
 from app.models.admin import Admin
-from app.models.academy import AcademyUser
+from app.models.academy import AcademyUser, Academy
 from app.models.student import Student
+from sqlalchemy.orm import joinedload
 
 security_scheme = HTTPBearer()
 
@@ -34,7 +35,29 @@ async def get_current_user(
     token = credentials.credentials
     
     try:
-        payload = security.decode_token(token)
+        # Try different secret keys to get user type first
+        from jose import jwt
+        
+        payload = None
+        user_type = None
+        
+        # Try different secret keys to decode and get user type
+        secret_keys_by_type = {
+            "student": settings.STUDENT_SECRET_KEY,
+            "academy": settings.ACADEMY_SECRET_KEY, 
+            "admin": settings.ADMIN_SECRET_KEY,
+            "default": settings.SECRET_KEY
+        }
+        
+        for test_user_type, secret_key in secret_keys_by_type.items():
+            try:
+                test_payload = jwt.decode(token, secret_key, algorithms=[settings.ALGORITHM])
+                user_type = test_payload.get("type", test_user_type)
+                payload = test_payload
+                break
+            except jwt.JWTError:
+                continue
+        
         if payload is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -115,9 +138,39 @@ async def get_current_admin(
 async def get_current_academy_user(
     credentials: HTTPAuthorizationCredentials = Depends(security_scheme),
     db: Session = Depends(get_db)
-) -> AcademyUser:
-    """Get current academy user."""
-    return await get_current_user(credentials, db)
+) -> User:
+    """Get current academy user with academy information."""
+    user = await get_current_user(credentials, db)
+    
+    # تحقق من أن المستخدم من نوع academy
+    if user.user_type != "academy":
+        from datetime import datetime
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "status": 403,
+                "error": "Forbidden",
+                "message": "هذا الحساب ليس حساب أكاديمية",
+                "path": "/api/v1/academy/",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        )
+    
+    # تحقق من وجود معلومات الأكاديمية
+    if not user.academy:
+        from datetime import datetime
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "status": 404,
+                "error": "Not Found",
+                "message": "لم يتم العثور على معلومات الأكاديمية",
+                "path": "/api/v1/academy/",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        )
+    
+    return user
 
 
 async def get_current_student(
@@ -163,7 +216,7 @@ def require_admin(current_user: Admin = Depends(get_current_admin)) -> Admin:
     return current_user
 
 
-def require_academy(current_user: AcademyUser = Depends(get_current_academy_user)) -> AcademyUser:
+def require_academy(current_user: User = Depends(get_current_academy_user)) -> User:
     """Require academy role."""
     return current_user
 

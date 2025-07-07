@@ -27,7 +27,6 @@ class Role(Base):
     # Relationships
     permissions = relationship("Permission", secondary=role_permissions, back_populates="roles")
     admins = relationship("Admin", back_populates="role")
-    academy_users = relationship("AcademyUser", back_populates="role")
 
 
 class Permission(Base):

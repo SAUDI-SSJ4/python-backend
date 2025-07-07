@@ -47,6 +47,7 @@ from .password import (
     PasswordReset,
     OTPVerifyForReset,
     PasswordResetWithToken,
+    PasswordForgotRequest,
     OTPVerificationResponse
 )
 
@@ -58,6 +59,9 @@ from .user import (
 
 # Legacy imports for backward compatibility
 from .auth import *
+
+# Product schemas
+from .product import *
 
 __all__ = [
     # Base
@@ -94,6 +98,7 @@ __all__ = [
     "PasswordReset",
     "OTPVerifyForReset",
     "PasswordResetWithToken",
+    "PasswordForgotRequest",
     "OTPVerificationResponse",
     
     # User

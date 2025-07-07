@@ -15,7 +15,7 @@ from app.core import security
 from app.schemas.auth import Token
 from app.models.user import User
 from app.models.student import Student
-from app.models.academy import Academy, AcademyUser
+from app.models.academy import Academy, AcademyUser, AcademyStatus, TrialStatus
 from app.models.otp import OTP, OTPPurpose
 from app.services.email_service import email_service
 
@@ -28,12 +28,14 @@ def get_current_timestamp():
 
 def create_unified_error_response(
     status_code: int = 400,
-    error_type: str = "Bad Request",
+    error_type: str = "خطأ",
+    message: str = "فشل الطلب",
     path: str = "/api/v1/auth/",
     validation_errors: Optional[Dict] = None,
     required_fields: Optional[Dict] = None,
     examples: Optional[Dict] = None,
     error_code: Optional[str] = None,
+    extra_data: Optional[Dict] = None,
     **kwargs
 ) -> Dict[str, Any]:
     """
@@ -45,7 +47,7 @@ def create_unified_error_response(
         "status_code": status_code,
         "error_type": error_code or error_type,
         "message": message,
-        "data": None,
+        "data": extra_data,
         "path": path,
         "timestamp": datetime.utcnow().isoformat()
     }
@@ -55,6 +57,7 @@ def create_unified_error_response(
 
 def create_unified_success_response(
     data: Any = None,
+    message: str = "تم الطلب بنجاح",
     status_code: int = 200,
     path: str | None = None
 ) -> Dict:
@@ -132,24 +135,29 @@ def create_student_profile(user: User, register_data: Any, db: Session):
 
 def create_academy_profile(user: User, register_data: Any, db: Session):
     """إنشاء ملف الأكاديمية"""
+    academy_name = getattr(register_data, 'academy_name', None) or f"{user.fname} {user.lname} Academy"
+    academy_about = getattr(register_data, 'academy_about', None)
+    
     academy_profile = Academy(
-        academy_id=generate_academy_id(register_data.academy_name or f"{user.fname}_{user.lname}"),
-        user_id=user.id,
-        name=register_data.academy_name,
-        about=register_data.academy_about,
+        name=academy_name,
+        about=academy_about,
         email=user.email,
         phone=user.phone_number,
-        status="active"
+        slug=generate_academy_slug(academy_name),
+        status=AcademyStatus.ACTIVE.value,
+        trial_status=TrialStatus.AVAILABLE.value
     )
     
     db.add(academy_profile)
     db.commit()
     db.refresh(academy_profile)
     
+    # إنشاء علاقة المستخدم مع الأكاديمية كمالك
     academy_user = AcademyUser(
         academy_id=academy_profile.id,
         user_id=user.id,
-        user_role="owner"
+        user_role="owner",
+        is_active=True
     )
     
     db.add(academy_user)
@@ -237,15 +245,20 @@ def generate_user_tokens(user: User, db: Session) -> Token:
             "user_type": user.user_type,
             "user_data": user_data
         },
-        message="تم إنشاء الحساب وتوليد التوكن بنجاح" if not user.is_verified else "تم تسجيل الدخول بنجاح",
+        message="أهلاً بك" if not user.is_verified else "تم تسجيل الدخول بنجاح",
         status_code=201,
         path="/api/v1/auth/login"
     )
 
 
-def generate_verification_token(user_id: int, email: str, purpose: str = "password_reset") -> str:
-    """ verification token"""
+def generate_verification_token(user_id: int, email: str, purpose: str = "password_reset", expires_in_minutes: int = 5) -> str:
+    """إنشاء توكن مؤقت للتحقق من العمليات الحساسة (مثل إعادة تعيين كلمة المرور)"""
+    from datetime import datetime, timedelta
+    import secrets
+    
     token = f"ver_{secrets.token_hex(16)}"
+    
+    expires_at = datetime.utcnow() + timedelta(minutes=expires_in_minutes)
     
     _verification_tokens[token] = {
         "user_id": user_id,

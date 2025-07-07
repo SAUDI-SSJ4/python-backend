@@ -1,7 +1,7 @@
 """
-Authentication Module
-====================
-Unified authentication system for SAYAN platform
+Authentication Package
+=====================
+يتضمن جميع راوترات ومرافق المصادقة ذات الصلة
 """
 
 from fastapi import APIRouter
@@ -10,25 +10,17 @@ from .auth_basic import router as basic_router
 from .auth_otp import router as otp_router
 from .auth_password import router as password_router
 
-# إنشاء router رئيسي للمصادقة
-auth_router = APIRouter()
+# Create main authentication router - إنشاء راوتر رئيسي للمصادقة
+router = APIRouter()
 
-# تجميع الـ routers الأساسية فقط في Swagger، بينما نخفي OTP و Password لمنع التكرار
-auth_router.include_router(basic_router)
+# Include basic routers only in Swagger, hide OTP & Password to prevent duplication - تجميع الراوترات الأساسية فقط في Swagger، إخفاء OTP و Password لمنع التكرار
+router.include_router(basic_router, prefix="")
 
-# مسارات OTP القديمة (لا تظهر في Swagger)
-auth_router.include_router(
-    otp_router,
-    prefix="/otp",
-    include_in_schema=False  # إخفاء من التوثيق لتجنب الازدواجية
-)
+# Legacy OTP routes (not shown in Swagger) - مسارات OTP القديمة (لا تظهر في Swagger)
+router.include_router(otp_router, prefix="/otp")
 
-# مسارات Password القديمة (لا تظهر في Swagger)
-auth_router.include_router(
-    password_router,
-    prefix="/password",
-    include_in_schema=False  # إخفاء من التوثيق لتجنب الازدواجية
-)
+# Legacy Password routes (not shown in Swagger) - مسارات Password القديمة (لا تظهر في Swagger)
+router.include_router(password_router, prefix="/password")
 
-# تصدير الـ router الرئيسي
-router = auth_router 
+# Export main router - تصدير الراوتر الرئيسي
+router = router 

@@ -10,37 +10,38 @@ import uuid
 
 class CourseStatus(str, enum.Enum):
     """Course status enumeration for clear status management"""
-    DRAFT = "draft"
-    PUBLISHED = "published"
-    ARCHIVED = "archived"
+    draft = "draft"
+    ready = "ready" 
+    published = "published"
+    archived = "archived"
 
 
 class CourseType(str, enum.Enum):
     """Course delivery type enumeration"""
-    LIVE = "live"          # Live streaming course
-    RECORDED = "recorded"   # Pre-recorded video course
-    ATTEND = "attend"      # In-person attendance required
+    live = "live"          # Live streaming course
+    recorded = "recorded"   # Pre-recorded video course
+    attend = "attend"      # In-person attendance required
 
 
 class CourseLevel(str, enum.Enum):
     """Course difficulty level enumeration"""
-    BEGINNER = "beginner"
-    INTERMEDIATE = "intermediate"
-    ADVANCED = "advanced"
+    beginner = "beginner"
+    intermediate = "intermediate"
+    advanced = "advanced"
 
 
 class Category(Base):
     __tablename__ = "categories"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(255), nullable=False)
+    title = Column(String(255), nullable=False)
     slug = Column(String(255), unique=True, index=True)
-    description = Column(Text, nullable=True)
+    content = Column(Text, nullable=True)
     image = Column(String(255), nullable=True)
     parent_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
-    is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    status = Column(Boolean, default=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     # Relationships
     parent = relationship("Category", remote_side=[id])
@@ -50,97 +51,102 @@ class Category(Base):
 
 class Course(Base):
     """
-    Course model representing a complete learning course within an academy.
-    
-    A course belongs to an academy and category, contains multiple chapters,
-    and can have various types (live, recorded, attend).
+    Course model - contains only course-specific fields
+    Title, price, description are stored in related Product model
     """
     __tablename__ = "courses"
 
-    # Primary identification
+    # Primary fields that match database schema exactly
     id = Column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    product_id = Column(Integer, ForeignKey("products.id", ondelete="CASCADE"), nullable=False)
     academy_id = Column(Integer, ForeignKey("academies.id", ondelete="CASCADE"), nullable=False)
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=False)
     trainer_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     
-    # Basic course information
-    title = Column(String(255), nullable=False, index=True)
+    # Course-specific fields
     slug = Column(String(255), nullable=False, unique=True, index=True)
     image = Column(String(255), nullable=False)
     content = Column(Text, nullable=False)
     short_content = Column(Text, nullable=False)
-    
-    # Course details and requirements
-    preparations = Column(Text)  # What students need to prepare
-    requirements = Column(Text)  # Prerequisites for the course
-    learning_outcomes = Column(Text)  # What students will learn
-    
-    # Media and preview content
-    gallery = Column(JSON)  # JSON array of gallery images
-    preview_video = Column(String(255))  # Preview/trailer video
+    preparations = Column(Text)
+    requirements = Column(Text)
+    learning_outcomes = Column(Text)
+    gallery = Column(JSON)
+    preview_video = Column(String(255))
     
     # Course configuration
-    status = Column(SQLEnum(CourseStatus), default=CourseStatus.DRAFT, nullable=False, index=True)
+    course_state = Column(SQLEnum(CourseStatus), default=CourseStatus.draft, nullable=False, index=True)
     featured = Column(Boolean, default=False, index=True)
-    type = Column(SQLEnum(CourseType), default=CourseType.RECORDED, nullable=False, index=True)
-    url = Column(String(255))  # External URL for live courses
-    level = Column(SQLEnum(CourseLevel), default=CourseLevel.BEGINNER, nullable=False, index=True)
+    type = Column(SQLEnum(CourseType), default=CourseType.recorded, nullable=False, index=True)
+    url = Column(String(255))
+    level = Column(SQLEnum(CourseLevel), default=CourseLevel.beginner, nullable=False, index=True)
     
-    # Pricing and financial
-    price = Column(Numeric(10, 2), default=0.00, nullable=False, index=True)
-    discount_price = Column(Numeric(10, 2))
-    discount_ends_at = Column(DateTime)
+    # Platform-specific fields
     platform_fee_percentage = Column(Numeric(5, 2), default=0.00, nullable=False)
     
-    # Statistics and metrics
+    # Statistics
     avg_rating = Column(Numeric(3, 2), default=0.00, nullable=False)
     ratings_count = Column(Integer, default=0, nullable=False)
     students_count = Column(Integer, default=0, nullable=False)
     lessons_count = Column(Integer, default=0, nullable=False)
-    duration_seconds = Column(Integer, default=0, nullable=False)
     completion_rate = Column(Numeric(5, 2), default=0.00, nullable=False)
     
     # Timestamps
     created_at = Column(DateTime, default=func.now(), nullable=False)
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
 
-    # Relationships - معلق مؤقتاً لحل conflicts
-    # academy = relationship("Academy", back_populates="courses")
+    # Relationships
+    product = relationship("Product", back_populates="courses")
     category = relationship("Category", back_populates="courses")
-    chapters = relationship("Chapter", back_populates="course", cascade="all, delete-orphan", order_by="Chapter.order_number")
+    academy = relationship("Academy")
+    trainer = relationship("User", foreign_keys=[trainer_id])
+    chapters = relationship("Chapter", back_populates="course", cascade="all, delete-orphan", lazy="dynamic")
     lessons = relationship("Lesson", back_populates="course", cascade="all, delete-orphan")
-    # student_enrollments = relationship("StudentCourse", back_populates="course")
+    student_enrollments = relationship("StudentCourse", back_populates="course")
+    cart_items = relationship("Cart", back_populates="course")
 
     def __repr__(self):
-        return f"<Course(id={self.id}, title='{self.title}', status='{self.status}')>"
+        return f"<Course(id={self.id}, course_state='{self.course_state}')>"
     
     @property
     def is_published(self) -> bool:
         """Check if the course is published and available to students"""
-        return self.status == CourseStatus.PUBLISHED
+        return self.course_state == CourseStatus.published
     
     @property
     def is_free(self) -> bool:
         """Check if the course is free"""
-        return self.price <= 0
+        if self.product:
+            return self.product.price <= 0
+        return True
     
     @property
     def current_price(self) -> Decimal:
         """Get current effective price (considering discounts)"""
-        if self.discount_price and self.discount_ends_at:
+        if not self.product:
+            return Decimal('0.00')
+            
+        if self.product.discount_price and self.product.discount_ends_at:
             from datetime import datetime
-            if datetime.utcnow() < self.discount_ends_at:
-                return self.discount_price
-        return self.price
+            if datetime.utcnow() < self.product.discount_ends_at:
+                return self.product.discount_price
+        return self.product.price
     
     @property
-    def duration_formatted(self) -> str:
-        """Get formatted duration string"""
+    def duration_seconds(self):
+        """Compute total duration of all lessons in seconds."""
+        total = 0
+        for chapter in getattr(self, 'chapters', []) or []:
+            for lesson in getattr(chapter, 'lessons', []) or []:
+                if lesson.duration_seconds:
+                    total += lesson.duration_seconds
+        return total
+
+    @property
+    def duration_formatted(self):
         hours = self.duration_seconds // 3600
         minutes = (self.duration_seconds % 3600) // 60
-        if hours > 0:
-            return f"{hours}h {minutes}m"
-        return f"{minutes}m"
+        return f"{hours}h {minutes}m" if hours else f"{minutes}m"
 
 
 

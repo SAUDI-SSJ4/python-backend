@@ -166,6 +166,7 @@ class UnifiedLogin(BaseModel):
     email: Optional[EmailStr] = Field(None, description="User email address")
     phone: Optional[str] = Field(None, pattern="^[0-9]{10,15}$", description="Phone number")
     password: str = Field(..., min_length=6, description="Password")
+    user_type: str = Field(..., pattern="^(student|academy|admin)$", description="User type")
     
     @validator('email')
     def validate_email_or_phone(cls, v, values):
@@ -177,7 +178,8 @@ class UnifiedLogin(BaseModel):
         "json_schema_extra": {
             "example": {
                 "email": "user@example.com",
-                "password": "password123"
+                "password": "password123",
+                "user_type": "student"
             }
         }
     }

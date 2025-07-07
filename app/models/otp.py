@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Enum as SQLEnum
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Enum as SQLEnum, BigInteger
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from enum import Enum
@@ -7,7 +7,7 @@ from app.db.base import Base
 
 class OTPPurpose(str, Enum):
     """
-    أغراض رموز التحقق المختلفة
+    أغراض رموز التحقق المختلفة - متوافق مع قاعدة البيانات
     """
     # تسجيل الدخول
     LOGIN = "login"
@@ -53,21 +53,14 @@ class OTPPurpose(str, Enum):
 class OTP(Base):
     __tablename__ = "otps"
 
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    id = Column(BigInteger, primary_key=True, index=True)
+    user_id = Column(BigInteger, ForeignKey("users.id"), nullable=False, index=True)
     code = Column(String(6), nullable=False)
     purpose = Column(SQLEnum(OTPPurpose, values_callable=lambda obj: [e.value for e in obj]), nullable=False, index=True)
     is_used = Column(Boolean, default=False, index=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    expires_at = Column(DateTime(timezone=True), nullable=False)
     attempts = Column(Integer, default=0)
-    
-    # إضافة حقول جديدة للأمان والوظائف المتقدمة
-    ip_address = Column(String(45), nullable=True)  # لتسجيل IP العنوان
-    user_agent = Column(String(500), nullable=True)  # لتسجيل متصفح المستخدم
-    device_id = Column(String(255), nullable=True)  # لتتبع الأجهزة
-    expires_in_minutes = Column(Integer, default=10)  # مدة الصلاحية بالدقائق
-    max_attempts = Column(Integer, default=3)  # عدد المحاولات المسموحة
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships
     user = relationship("User", back_populates="otps")

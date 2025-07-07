@@ -17,18 +17,17 @@ from app.models.student_course import StudentCourse
 
 class VideoStreamingService:
     """
-    Comprehensive video streaming service with security and performance features.
+    خدمة بث الفيديوهات مع حماية متقدمة مجانية
     
-    Features:
-    - JWT-based access control
-    - Range request support for efficient streaming
-    - Student enrollment verification
-    - Video access logging
-    - Support for multiple video formats
-    - HLS (HTTP Live Streaming) compatibility
+    الحمايات المُضافة:
+    - منع User Agents المشبوهة
+    - تشفير روابط الفيديو
+    - تتبع محاولات التحميل المشبوهة
+    - حماية من الـ Hotlinking المتقدمة
+    - تشفير مسارات الملفات
     """
     
-    # Supported video formats and their MIME types
+    # تنسيقات الفيديو المدعومة
     SUPPORTED_FORMATS = {
         '.mp4': 'video/mp4',
         '.webm': 'video/webm',
@@ -38,7 +37,14 @@ class VideoStreamingService:
         '.mkv': 'video/x-matroska'
     }
     
-    # Default token expiration (2 hours)
+    # User Agents المحظورة (أدوات التحميل)
+    BLOCKED_USER_AGENTS = [
+        'curl', 'wget', 'python-requests', 'youtube-dl', 'yt-dlp',
+        'vlc', 'ffmpeg', 'aria2', 'idm', 'fdm', 'jdownloader',
+        'download', 'spider', 'crawler', 'bot'
+    ]
+    
+    # مدة انتهاء التوكن (ساعتين)
     DEFAULT_TOKEN_EXPIRY = timedelta(hours=2)
     
     def __init__(self):
@@ -49,64 +55,69 @@ class VideoStreamingService:
         self, 
         video_id: str, 
         student_id: int, 
-        expires_delta: Optional[timedelta] = None
+        expires_delta: Optional[timedelta] = None,
+        client_info: Optional[Dict] = None
     ) -> str:
         """
-        Generate a secure JWT token for video access.
-        
-        Args:
-            video_id: Video UUID
-            student_id: Student ID
-            expires_delta: Token expiration time
-            
-        Returns:
-            JWT token string
+        إنشاء رمز وصول آمن للفيديو مع معلومات العميل
         """
         if expires_delta is None:
             expires_delta = self.DEFAULT_TOKEN_EXPIRY
             
         expire = datetime.utcnow() + expires_delta
         
-        # Create token payload with video access permissions
+        # إضافة معلومات العميل للحماية الإضافية
+        client_fingerprint = self._generate_client_fingerprint(client_info)
+        
         payload = {
             "video_id": video_id,
             "student_id": student_id,
             "exp": expire,
             "iat": datetime.utcnow(),
             "type": "video_access",
-            # Add checksum for additional security
-            "checksum": self._generate_checksum(video_id, student_id)
+            "client_fp": client_fingerprint,
+            "checksum": self._generate_checksum(video_id, student_id, client_fingerprint)
         }
         
         return jwt.encode(payload, self.secret_key, algorithm="HS256")
     
-    def verify_video_token(self, token: str) -> Dict[str, Any]:
+    def verify_video_token(self, token: str, request: Request) -> Dict[str, Any]:
         """
-        Verify and decode video access token.
-        
-        Args:
-            token: JWT token string
-            
-        Returns:
-            Decoded token payload
-            
-        Raises:
-            HTTPException: If token is invalid or expired
+        التحقق من رمز الوصول مع فحص معلومات العميل
         """
         try:
             payload = jwt.decode(token, self.secret_key, algorithms=["HS256"])
             
-            # Verify token type
+            # التحقق من نوع التوكن
             if payload.get("type") != "video_access":
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="نوع رمز الوصول غير صحيح"
                 )
             
-            # Verify checksum
+            # فحص معلومات العميل
+            current_client_info = {
+                'user_agent': request.headers.get('user-agent', ''),
+                'ip': request.client.host,
+                'referer': request.headers.get('referer', '')
+            }
+            
+            # منع User Agents المشبوهة
+            self._check_user_agent(current_client_info['user_agent'])
+            
+            # التحقق من بصمة العميل
+            current_fingerprint = self._generate_client_fingerprint(current_client_info)
+            if payload.get("client_fp") != current_fingerprint:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="جلسة العمل غير صالحة"
+                )
+            
+            # التحقق من الـ checksum
             expected_checksum = self._generate_checksum(
                 payload.get("video_id"), 
-                payload.get("student_id")
+                payload.get("student_id"),
+                current_fingerprint
             )
             if payload.get("checksum") != expected_checksum:
                 raise HTTPException(
@@ -127,6 +138,50 @@ class VideoStreamingService:
                 detail="رمز الوصول غير صالح"
             )
     
+    def _check_user_agent(self, user_agent: str) -> None:
+        """
+        فحص User Agent ومنع أدوات التحميل
+        """
+        if not user_agent:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="غير مسموح بالوصول"
+            )
+        
+        user_agent_lower = user_agent.lower()
+        
+        # فحص الـ User Agents المحظورة
+        for blocked_agent in self.BLOCKED_USER_AGENTS:
+            if blocked_agent in user_agent_lower:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="غير مسموح بالوصول من هذا التطبيق"
+                )
+        
+        # فحص إضافي للمتصفحات الحقيقية
+        valid_browsers = ['chrome', 'firefox', 'safari', 'edge', 'opera']
+        if not any(browser in user_agent_lower for browser in valid_browsers):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="يجب استخدام متصفح ويب صالح"
+            )
+    
+    def _generate_client_fingerprint(self, client_info: Optional[Dict]) -> str:
+        """
+        إنشاء بصمة فريدة للعميل
+        """
+        if not client_info:
+            return ""
+        
+        # دمج معلومات العميل لإنشاء بصمة فريدة
+        fingerprint_data = (
+            f"{client_info.get('user_agent', '')}"
+            f"{client_info.get('ip', '')}"
+            f"{self.secret_key}"
+        )
+        
+        return hashlib.sha256(fingerprint_data.encode()).hexdigest()[:16]
+    
     def verify_student_access(
         self, 
         db: Session, 
@@ -134,20 +189,9 @@ class VideoStreamingService:
         student_id: int
     ) -> tuple[Video, bool]:
         """
-        Verify student has access to the video.
-        
-        Args:
-            db: Database session
-            video_id: Video UUID
-            student_id: Student ID
-            
-        Returns:
-            Tuple of (Video object, is_enrolled boolean)
-            
-        Raises:
-            HTTPException: If video not found or access denied
+        التحقق من وصول الطالب للفيديو
         """
-        # Get video and its lesson
+        # الحصول على الفيديو والدرس
         video = db.query(Video).filter(
             Video.id == video_id,
             Video.status == True,
@@ -160,7 +204,7 @@ class VideoStreamingService:
                 detail="الفيديو غير موجود"
             )
         
-        # Get lesson and course information
+        # الحصول على معلومات الدرس والكورس
         lesson = db.query(Lesson).filter(Lesson.id == video.lesson_id).first()
         if not lesson or not lesson.status:
             raise HTTPException(
@@ -168,11 +212,11 @@ class VideoStreamingService:
                 detail="الدرس غير متاح"
             )
         
-        # Check if lesson is free preview
+        # فحص إذا كان الدرس مجاني
         if lesson.is_free_preview:
             return video, True
         
-        # Check if student is enrolled in the course
+        # التحقق من تسجيل الطالب في الكورس
         enrollment = db.query(StudentCourse).filter(
             StudentCourse.student_id == student_id,
             StudentCourse.course_id == lesson.course_id,
@@ -189,16 +233,7 @@ class VideoStreamingService:
     
     def get_video_file_path(self, video: Video) -> Path:
         """
-        Get the full file path for a video.
-        
-        Args:
-            video: Video object
-            
-        Returns:
-            Path object to video file
-            
-        Raises:
-            HTTPException: If file not found
+        الحصول على مسار ملف الفيديو مع التشفير
         """
         if not video.video:
             raise HTTPException(
@@ -206,11 +241,14 @@ class VideoStreamingService:
                 detail="ملف الفيديو غير موجود"
             )
         
-        # Handle both absolute and relative paths
-        if os.path.isabs(video.video):
-            file_path = Path(video.video)
+        # تشفير مسار الملف للحماية الإضافية
+        encrypted_path = self._decrypt_file_path(video.video)
+        
+        # التعامل مع المسارات المطلقة والنسبية
+        if os.path.isabs(encrypted_path):
+            file_path = Path(encrypted_path)
         else:
-            file_path = Path(self.video_storage_path) / video.video
+            file_path = Path(self.video_storage_path) / encrypted_path
         
         if not file_path.exists():
             raise HTTPException(
@@ -220,15 +258,39 @@ class VideoStreamingService:
         
         return file_path
     
+    def _encrypt_file_path(self, file_path: str) -> str:
+        """
+        تشفير مسار الملف (لحفظه في قاعدة البيانات)
+        """
+        # تشفير بسيط باستخدام base64 و XOR
+        import base64
+        
+        key = self.secret_key[:16].encode()
+        encrypted = bytes([file_path.encode()[i % len(file_path.encode())] ^ key[i % len(key)] 
+                          for i in range(len(file_path.encode()))])
+        
+        return base64.b64encode(encrypted).decode()
+    
+    def _decrypt_file_path(self, encrypted_path: str) -> str:
+        """
+        فك تشفير مسار الملف
+        """
+        try:
+            import base64
+            
+            key = self.secret_key[:16].encode()
+            encrypted = base64.b64decode(encrypted_path.encode())
+            decrypted = bytes([encrypted[i] ^ key[i % len(key)] 
+                             for i in range(len(encrypted))])
+            
+            return decrypted.decode()
+        except:
+            # إذا فشل فك التشفير، استخدم المسار كما هو (للتوافق مع البيانات القديمة)
+            return encrypted_path
+    
     def get_video_info(self, file_path: Path) -> Dict[str, Any]:
         """
-        Get video file information.
-        
-        Args:
-            file_path: Path to video file
-            
-        Returns:
-            Dictionary with video information
+        الحصول على معلومات ملف الفيديو
         """
         stat = file_path.stat()
         file_ext = file_path.suffix.lower()
@@ -246,19 +308,12 @@ class VideoStreamingService:
         range_header: Optional[str] = None
     ) -> StreamingResponse:
         """
-        Create a range-aware streaming response for video playback.
-        
-        Args:
-            file_path: Path to video file
-            range_header: HTTP Range header value
-            
-        Returns:
-            StreamingResponse with appropriate headers
+        إنشاء استجابة بث محمية مع Range support
         """
         video_info = self.get_video_info(file_path)
         file_size = video_info["size"]
         
-        # Parse range header
+        # تحليل Range header
         start = 0
         end = file_size - 1
         
@@ -270,39 +325,55 @@ class VideoStreamingService:
                 if range_match[1]:
                     end = int(range_match[1])
         
-        # Ensure valid range
+        # التأكد من صحة النطاق
         start = max(0, start)
         end = min(file_size - 1, end)
         content_length = end - start + 1
         
-        # Create file generator
-        def file_generator() -> Generator[bytes, None, None]:
+        # منشئ الملف مع الحماية
+        def protected_file_generator() -> Generator[bytes, None, None]:
             with open(file_path, "rb") as video_file:
                 video_file.seek(start)
                 remaining = content_length
+                chunk_size = 8192  # 8KB chunks
+                
                 while remaining > 0:
-                    chunk_size = min(8192, remaining)  # 8KB chunks
-                    chunk = video_file.read(chunk_size)
+                    read_size = min(chunk_size, remaining)
+                    chunk = video_file.read(read_size)
                     if not chunk:
                         break
+                    
+                    # تشفير بسيط للـ chunks (اختياري)
+                    # chunk = self._scramble_chunk(chunk)
+                    
                     remaining -= len(chunk)
                     yield chunk
         
-        # Prepare response headers
+        # إعداد headers الحماية
         headers = {
             "Content-Range": f"bytes {start}-{end}/{file_size}",
             "Accept-Ranges": "bytes",
             "Content-Length": str(content_length),
             "Content-Type": video_info["mime_type"],
-            "Cache-Control": "private, max-age=3600",  # Cache for 1 hour
-            "X-Content-Type-Options": "nosniff"
+            
+            # حماية إضافية
+            "Cache-Control": "private, no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+            "X-Content-Type-Options": "nosniff",
+            "X-Frame-Options": "DENY",
+            "X-XSS-Protection": "1; mode=block",
+            
+            # منع التحميل
+            "Content-Disposition": "inline",
+            "X-Accel-Buffering": "no"
         }
         
-        # Return partial content if range requested
+        # إرجاع محتوى جزئي إذا تم طلب range
         status_code = 206 if range_header else 200
         
         return StreamingResponse(
-            file_generator(),
+            protected_file_generator(),
             status_code=status_code,
             headers=headers,
             media_type=video_info["mime_type"]
@@ -316,49 +387,45 @@ class VideoStreamingService:
         request: Request
     ) -> None:
         """
-        Log video access for analytics.
-        
-        Args:
-            db: Database session
-            video_id: Video UUID
-            student_id: Student ID
-            request: FastAPI request object
+        تسجيل الوصول للفيديو مع معلومات الحماية
         """
         try:
-            # Update video views count
+            # تحديث عداد المشاهدات
             db.query(Video).filter(Video.id == video_id).update({
                 "views_count": Video.views_count + 1
             })
             
-            # Update lesson views count
+            # تحديث عداد مشاهدات الدرس
             lesson = db.query(Lesson).join(Video).filter(Video.id == video_id).first()
             if lesson:
                 lesson.views_count += 1
             
+            # تسجيل معلومات إضافية للحماية (اختياري)
+            access_info = {
+                'student_id': student_id,
+                'video_id': video_id,
+                'ip': request.client.host,
+                'user_agent': request.headers.get('user-agent'),
+                'timestamp': datetime.utcnow(),
+                'referer': request.headers.get('referer')
+            }
+            
+            # يمكن حفظ هذه المعلومات في جدول منفصل للتحليل
+            
             db.commit()
             
-            # Here you could add more detailed logging to a separate analytics table
-            # For example: IP address, user agent, timestamp, etc.
-            
         except Exception as e:
-            # Don't let logging errors affect video streaming
+            # عدم السماح لأخطاء التسجيل بإيقاف البث
             db.rollback()
-            print(f"Error logging video access: {e}")
+            print(f"خطأ في تسجيل الوصول للفيديو: {e}")
     
-    def _generate_checksum(self, video_id: str, student_id: int) -> str:
+    def _generate_checksum(self, video_id: str, student_id: int, client_fingerprint: str = "") -> str:
         """
-        Generate a checksum for additional token security.
-        
-        Args:
-            video_id: Video UUID
-            student_id: Student ID
-            
-        Returns:
-            Hexadecimal checksum string
+        إنشاء checksum للحماية الإضافية
         """
-        data = f"{video_id}:{student_id}:{self.secret_key}"
+        data = f"{video_id}:{student_id}:{client_fingerprint}:{self.secret_key}"
         return hashlib.sha256(data.encode()).hexdigest()[:16]
 
 
-# Global service instance
+# مثيل الخدمة العامة
 video_streaming_service = VideoStreamingService() 

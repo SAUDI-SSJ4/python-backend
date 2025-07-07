@@ -4,12 +4,14 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 import uuid
 from datetime import datetime
+from dateutil import parser
 
 from app.deps.database import get_db
 from app.deps.auth import get_current_academy_user, get_current_student, get_current_user
 from app.models.course import Course, CourseStatus, CourseType, CourseLevel
 from app.models.academy import Academy
 from app.models.user import User
+from app.models.product import Product, ProductType, ProductStatus
 from app.schemas.course import (
     CourseCreate, CourseUpdate, CourseResponse, CourseDetailResponse,
     CourseListResponse, CourseFilters, CourseStatusUpdate
@@ -33,8 +35,8 @@ async def get_academy_courses(
     Academy owners can view and manage all their courses with comprehensive filtering options.
     """
     try:
-        # Build base query for academy's courses
-        query = db.query(Course).filter(Course.academy_id == current_user.academy.id)
+        # Build base query for academy's courses with product join
+        query = db.query(Course).join(Product).filter(Course.academy_id == current_user.academy.id)
         
         # Apply filters
         if filters.category_id:
@@ -44,7 +46,7 @@ async def get_academy_courses(
             query = query.filter(Course.trainer_id == filters.trainer_id)
         
         if filters.status:
-            query = query.filter(Course.status == filters.status)
+            query = query.filter(Course.course_state == filters.status)
         
         if filters.type:
             query = query.filter(Course.type == filters.type)
@@ -53,17 +55,17 @@ async def get_academy_courses(
             query = query.filter(Course.level == filters.level)
         
         if filters.price_from is not None:
-            query = query.filter(Course.price >= filters.price_from)
+            query = query.filter(Product.price >= filters.price_from)
         
         if filters.price_to is not None:
-            query = query.filter(Course.price <= filters.price_to)
+            query = query.filter(Product.price <= filters.price_to)
         
         if filters.featured is not None:
             query = query.filter(Course.featured == filters.featured)
         
         if filters.search:
             search_term = f"%{filters.search}%"
-            query = query.filter(Course.title.ilike(search_term))
+            query = query.filter(Product.title.ilike(search_term))
         
         # Get total count before pagination
         total = query.count()
@@ -76,7 +78,7 @@ async def get_academy_courses(
         total_pages = (total + filters.per_page - 1) // filters.per_page
         
         return CourseListResponse(
-            courses=courses,
+            courses=[CourseResponse.from_course_model(course) for course in courses],
             total=total,
             page=filters.page,
             per_page=filters.per_page,
@@ -92,7 +94,23 @@ async def get_academy_courses(
 
 @router.post("/academy/courses", response_model=CourseResponse)
 async def create_course(
-    course_data: CourseCreate,
+    category_id: int = Form(..., description="معرف الفئة"),
+    trainer_id: int = Form(..., description="معرف المدرب"),
+    title: str = Form(..., min_length=3, max_length=255, description="عنوان الكورس"),
+    content: str = Form(..., min_length=10, description="وصف الكورس المفصل"),
+    short_content: str = Form(..., min_length=10, max_length=500, description="وصف الكورس المختصر"),
+    preparations: Optional[str] = Form(None, description="التحضيرات المطلوبة"),
+    requirements: Optional[str] = Form(None, description="المتطلبات الأساسية"),
+    learning_outcomes: Optional[str] = Form(None, description="نتائج التعلم"),
+    type: str = Form("recorded", description="نوع الكورس"),
+    level: str = Form("beginner", description="مستوى الكورس"),
+    price: float = Form(..., ge=0, description="سعر الكورس"),
+    discount_price: Optional[float] = Form(None, ge=0, description="سعر الخصم"),
+    discount_ends_at: Optional[str] = Form(None, description="تاريخ انتهاء الخصم"),
+    url: Optional[str] = Form(None, description="رابط الكورس المباشر"),
+    featured: bool = Form(False, description="كورس مميز"),
+    product_id: Optional[int] = Form(None, ge=0, description="معرف المنتج (اختياري)"),
+    image: UploadFile = File(..., description="صورة الكورس"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_academy_user)
 ):
@@ -105,7 +123,7 @@ async def create_course(
     try:
         # Verify trainer belongs to the academy
         trainer = db.query(User).filter(
-            User.id == course_data.trainer_id,
+            User.id == trainer_id,
             User.user_type == "academy"  # Trainers are academy users
         ).first()
         
@@ -115,32 +133,74 @@ async def create_course(
                 detail="المدرب غير موجود"
             )
         
-        # Calculate platform fee
-        platform_fee = course_data.price * (settings.PLATFORM_FEE_PERCENTAGE / 100)
+        # Convert and validate datetime if provided
+        parsed_discount_ends_at = None
+        if discount_ends_at:
+            try:
+                from dateutil import parser
+                parsed_discount_ends_at = parser.parse(discount_ends_at)
+            except Exception:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="تنسيق التاريخ غير صحيح"
+                )
         
-        # Create course object
+        # Handle image upload
+        image_path = None
+        if image:
+            try:
+                image_path = await file_service.upload_course_image(image, None)  # course_id will be set after creation
+            except Exception as e:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"خطأ في رفع الصورة: {str(e)}"
+                )
+        
+        # Convert types
+        from decimal import Decimal
+        price_decimal = Decimal(str(price))
+        discount_price_decimal = Decimal(str(discount_price)) if discount_price else None
+        
+        # إنشاء المنتج تلقائياً للكورس
+        product = Product(
+            academy_id=current_user.academy.id,
+            title=title,
+            description=short_content,
+            price=price_decimal,
+            discount_price=discount_price_decimal,
+            currency="SAR",
+            product_type="course",  # string value
+            status="draft",  # string value
+            discount_ends_at=parsed_discount_ends_at
+        )
+        
+        db.add(product)
+        db.flush()  # للحصول على product.id قبل الـ commit
+        
+        # Calculate platform fee
+        platform_fee = price_decimal * (Decimal(settings.PLATFORM_FEE_PERCENTAGE) / 100)
+        
+        # Create course object - باستخدام course_state والحقول الصحيحة فقط
         course = Course(
             id=str(uuid.uuid4()),
             academy_id=current_user.academy.id,
-            category_id=course_data.category_id,
-            trainer_id=course_data.trainer_id,
-            title=course_data.title,
-            slug=f"{course_data.title.lower().replace(' ', '-')}-{str(uuid.uuid4())[:8]}",
-            image=course_data.image,
-            content=course_data.content,
-            short_content=course_data.short_content,
-            preparations=course_data.preparations,
-            requirements=course_data.requirements,
-            learning_outcomes=course_data.learning_outcomes,
-            gallery=course_data.gallery,
-            preview_video=course_data.preview_video,
-            type=course_data.type,
-            level=course_data.level,
-            price=course_data.price,
-            discount_price=course_data.discount_price,
-            discount_ends_at=course_data.discount_ends_at,
-            url=course_data.url,
-            featured=course_data.featured,
+            category_id=category_id,
+            trainer_id=trainer_id,
+            product_id=product_id or product.id,  # استخدام product_id المرسل أو المنتج المُنشأ تلقائياً
+            slug=f"{title.lower().replace(' ', '-')}-{str(uuid.uuid4())[:8]}",
+            image=image_path or "",
+            content=content,
+            short_content=short_content,
+            preparations=preparations,
+            requirements=requirements,
+            learning_outcomes=learning_outcomes,
+            gallery=None,  # سيتم إضافة دعم المعرض لاحقاً
+            preview_video=None,  # سيتم إضافة دعم الفيديو لاحقاً
+            type=type,
+            level=level,
+            url=url,
+            featured=featured,
+            course_state=CourseStatus.DRAFT,  # استخدام course_state بدلاً من status
             platform_fee_percentage=platform_fee
         )
         
@@ -148,7 +208,7 @@ async def create_course(
         db.commit()
         db.refresh(course)
         
-        return CourseResponse.from_orm(course)
+        return CourseResponse.from_course_model(course)
         
     except HTTPException:
         raise
@@ -179,10 +239,10 @@ async def get_course_details(
     if not course:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="الدورة غير موجودة"
-        )
+                    detail="الدورة غير موجودة"
+    )
     
-    return CourseDetailResponse.from_orm(course)
+    return CourseDetailResponse.from_course_model(course)
 
 
 @router.put("/academy/courses/{course_id}", response_model=CourseResponse)
@@ -215,19 +275,40 @@ async def update_course(
         
         # Recalculate platform fee if price changed
         if 'price' in update_data:
-            update_data['platform_fee_percentage'] = update_data['price'] * (settings.PLATFORM_FEE_PERCENTAGE / 100)
+            from decimal import Decimal
+            update_data['platform_fee_percentage'] = update_data['price'] * (Decimal(settings.PLATFORM_FEE_PERCENTAGE) / 100)
         
         # Update slug if title changed
         if 'title' in update_data:
             update_data['slug'] = f"{update_data['title'].lower().replace(' ', '-')}-{str(uuid.uuid4())[:8]}"
         
+        # تحديث المنتج المرتبط بالكورس
+        product = db.query(Product).filter(Product.id == course.product_id).first()
+        if product:
+            # تحديث بيانات المنتج حسب تحديثات الكورس
+            product_updates = {}
+            if 'title' in update_data:
+                product_updates['title'] = update_data['title']
+            if 'short_content' in update_data:
+                product_updates['description'] = update_data['short_content']
+            if 'price' in update_data:
+                product_updates['price'] = update_data['price']
+            if 'discount_price' in update_data:
+                product_updates['discount_price'] = update_data['discount_price']
+            if 'discount_ends_at' in update_data:
+                product_updates['discount_ends_at'] = update_data['discount_ends_at']
+            
+            for field, value in product_updates.items():
+                setattr(product, field, value)
+        
+        # تحديث الكورس
         for field, value in update_data.items():
             setattr(course, field, value)
         
         db.commit()
         db.refresh(course)
         
-        return CourseResponse.from_orm(course)
+        return CourseResponse.from_course_model(course)
         
     except Exception as e:
         db.rollback()
@@ -261,11 +342,24 @@ async def update_course_status(
         )
     
     try:
-        course.status = status_data.status
+        # تحديث حالة الكورس
+        course.course_state = status_data.status
+        
+        # تحديث حالة المنتج المرتبط لتتطابق مع حالة الكورس
+        product = db.query(Product).filter(Product.id == course.product_id).first()
+        if product:
+            # تحويل حالة الكورس إلى حالة منتج مناسبة
+            if status_data.status == CourseStatus.PUBLISHED:
+                product.status = "published"
+            elif status_data.status == CourseStatus.ARCHIVED:
+                product.status = "archived"
+            else:  # DRAFT
+                product.status = "draft"
+        
         db.commit()
         db.refresh(course)
         
-        return CourseResponse.from_orm(course)
+        return CourseResponse.from_course_model(course)
         
     except Exception as e:
         db.rollback()
@@ -310,6 +404,11 @@ async def delete_course(
             for image in course.gallery:
                 file_service.delete_file(image)
         
+        # حذف المنتج المرتبط بالكورس
+        product = db.query(Product).filter(Product.id == course.product_id).first()
+        if product:
+            db.delete(product)
+        
         db.delete(course)
         db.commit()
         
@@ -342,8 +441,8 @@ async def get_public_courses(
     for students and visitors to browse available courses.
     """
     try:
-        # Build base query for published courses only
-        query = db.query(Course).filter(Course.status == CourseStatus.PUBLISHED)
+        # Build base query for published courses only with product join
+        query = db.query(Course).join(Product).filter(Course.course_state == CourseStatus.PUBLISHED)
         
         # Apply filters (same as academy endpoint but only for published courses)
         if filters.category_id:
@@ -353,17 +452,17 @@ async def get_public_courses(
             query = query.filter(Course.level == filters.level)
         
         if filters.price_from is not None:
-            query = query.filter(Course.price >= filters.price_from)
+            query = query.filter(Product.price >= filters.price_from)
         
         if filters.price_to is not None:
-            query = query.filter(Course.price <= filters.price_to)
+            query = query.filter(Product.price <= filters.price_to)
         
         if filters.featured is not None:
             query = query.filter(Course.featured == filters.featured)
         
         if filters.search:
             search_term = f"%{filters.search}%"
-            query = query.filter(Course.title.ilike(search_term))
+            query = query.filter(Product.title.ilike(search_term))
         
         # Order by featured first, then by creation date
         query = query.order_by(Course.featured.desc(), Course.created_at.desc())
@@ -379,7 +478,7 @@ async def get_public_courses(
         total_pages = (total + filters.per_page - 1) // filters.per_page
         
         return CourseListResponse(
-            courses=courses,
+            courses=[CourseResponse.from_course_model(course) for course in courses],
             total=total,
             page=filters.page,
             per_page=filters.per_page,
@@ -406,13 +505,13 @@ async def get_public_course_details(
     """
     course = db.query(Course).filter(
         Course.id == course_id,
-        Course.status == CourseStatus.PUBLISHED
+        Course.course_state == CourseStatus.PUBLISHED
     ).first()
     
     if not course:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="الدورة غير موجودة أو غير متاحة"
-        )
+                    detail="الدورة غير موجودة أو غير متاحة"
+    )
     
-    return CourseDetailResponse.from_orm(course) 
+    return CourseDetailResponse.from_course_model(course) 

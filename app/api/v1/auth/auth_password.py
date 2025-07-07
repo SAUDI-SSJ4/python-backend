@@ -16,16 +16,11 @@ from app.core.config import settings
 from app.deps import get_db
 from app.schemas import (
     PasswordChange,
-    PasswordResetRequest,
-    PasswordReset,
     PasswordResetWithToken,
-    OTPVerifyForReset
+    PasswordForgotRequest,
 )
 from app.schemas.base import BaseResponse
 from app.models.user import User
-from app.models.otp import OTPPurpose
-from app.services.otp_service import OTPService
-from app.services.email_service import email_service
 from .auth_utils import (
     create_unified_error_response,
     create_validation_error_response,
@@ -34,6 +29,10 @@ from .auth_utils import (
     invalidate_verification_token,
     create_unified_success_response
 )
+from app.services.auth_service import auth_service
+from app.services.email_service import email_service
+from app.services.otp_service import OTPService
+from app.models.otp import OTPPurpose
 
 router = APIRouter()
 
@@ -218,226 +217,6 @@ def change_password(
     )
 
 
-@router.post("/forgot", response_model=BaseResponse, response_model_exclude_none=True, tags=["Password"])
-def forgot_password(
-    request_data: PasswordResetRequest = Body(...),
-    db: Session = Depends(get_db)
-) -> Any:
-    """    """
-    
-    try:
-        user = db.query(User).filter(User.email == request_data.email).first()
-        
-        if not user:
-            return create_unified_success_response(
-                status_code=200,
-                path="/api/v1/auth/password/forgot"
-            )
-        
-        if user.account_type != "local":
-            return create_unified_success_response(
-                status_code=200,
-                path="/api/v1/auth/password/forgot"
-            )
-        
-        otp = OTPService.create_otp(
-            db=db,
-            user_id=user.id,
-            purpose=OTPPurpose.PASSWORD_RESET,
-        )
-        
-        
-        try:
-            success = email_service.send_otp_email(
-                to_email=user.email,
-                user_name=user_name,
-                otp_code=otp.code,
-                purpose=OTPPurpose.PASSWORD_RESET.value
-            )
-            
-            if not success:
-                db.delete(otp)
-                db.commit()
-        except Exception as e:
-            db.delete(otp)
-            db.commit()
-        
-        return create_unified_success_response(
-            status_code=200,
-            path="/api/v1/auth/password/forgot"
-        )
-        
-    except Exception as e:
-        import traceback
-        print(f"Traceback: {traceback.format_exc()}")
-        
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=create_unified_error_response(
-                status_code=422,
-                error_code="password_reset_request_failed",
-                validation_errors=create_validation_error_response(
-                ),
-                required_fields={
-                    "password_reset_request": {
-                    }
-                },
-                examples={
-                    "password_reset_request": {
-                        "email": "alitaha27191@gmail.com"
-                    }
-                }
-            )
-        )
-
-                        
-                
-                   
-                
-        
-
-@router.post("/verify-otp", response_model=BaseResponse, response_model_exclude_none=True, tags=["Password"])
-def verify_otp_for_reset(
-    verify_data: OTPVerifyForReset = Body(...),
-    db: Session = Depends(get_db)
-) -> Any:
-    """التحقق من OTP لإعادة تعيين كلمة المرور وإرجاع verification token"""
-    
-    try:
-        user = db.query(User).filter(User.email == verify_data.email).first()
-        
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=create_unified_error_response(
-                    status_code=422,
-                    error_code="invalid_email",
-                    message="البريد الإلكتروني غير مسجل في النظام",
-                    validation_errors=create_validation_error_response(
-                        invalid_fields=[{"field": "email", "error": "البريد الإلكتروني غير موجود", "input": verify_data.email}]
-                    ),
-                    required_fields={
-                        "email_verification": {
-                            "email": "بريد إلكتروني مسجل في النظام"
-                        }
-                    },
-                    examples={
-                        "valid_email": {
-                            "email": "alitaha27191@gmail.com"
-                        }
-                    }
-                )
-            )
-        
-        if user.account_type != "local":
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=create_unified_error_response(
-                    status_code=400,
-                    error_code="invalid_account_type",
-                    message="إعادة تعيين كلمة المرور غير متاح لحسابات Google",
-                    validation_errors=create_validation_error_response(
-                        invalid_fields=[{"field": "account_type", "error": "نوع الحساب غير مدعوم", "input": user.account_type}]
-                    ),
-                    required_fields={
-                        "account_type": {
-                            "type": "يجب أن يكون الحساب محلي (local)"
-                        }
-                    },
-                    examples={
-                        "local_account": {
-                            "suggestion": "هذه الميزة متاحة فقط للحسابات المحلية"
-                        }
-                    }
-                )
-            )
-        
-        from app.models.otp import OTP
-        from datetime import datetime
-        
-        otp_record = db.query(OTP).filter(
-            OTP.user_id == user.id,
-            OTP.code == verify_data.otp,
-            OTP.purpose == OTPPurpose.PASSWORD_RESET,
-            OTP.is_used == False,
-            OTP.expires_at > datetime.utcnow()
-        ).first()
-        
-        if not otp_record:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=create_unified_error_response(
-                    status_code=422,
-                    error_code="invalid_otp_data",
-                    message="رمز التحقق غير صحيح أو منتهي الصلاحية",
-                    validation_errors=create_validation_error_response(
-                        invalid_fields=[{"field": "otp", "error": "رمز غير صالح أو منتهي الصلاحية", "input": "***"}]
-                    ),
-                    required_fields={
-                        "otp_verification": {
-                            "email": "البريد الإلكتروني المسجل",
-                            "otp": "رمز التحقق صحيح وساري المفعول"
-                        }
-                    },
-                    examples={
-                        "otp_verification": {
-                            "email": "alitaha27191@gmail.com",
-                            "otp": "123456"
-                        }
-                    }
-                )
-            )
-        
-        otp_record.is_used = True
-        otp_record.attempts += 1
-        db.commit()
-        
-        verification_token = generate_verification_token(
-            user_id=user.id,
-            email=user.email,
-            purpose="password_reset"
-        )
-        
-        return create_unified_success_response(
-            data={
-                "verification_token": verification_token,
-                "expires_in": 300
-            },
-            message="تم التحقق من OTP بنجاح. استخدم التوكن لإعادة تعيين كلمة المرور",
-            status_code=200,
-            path="/api/v1/auth/password/verify-otp"
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f" خطأ غير متوقع في verify_otp_for_reset: {str(e)}")
-        import traceback
-        print(f"Traceback: {traceback.format_exc()}")
-        
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=create_unified_error_response(
-                status_code=500,
-                error_code="otp_verification_failed",
-                message="حدث خطأ في التحقق من OTP",
-                validation_errors=create_validation_error_response(
-                    invalid_fields=[{"field": "server", "error": "خطأ في الخادم", "input": str(e)[:100]}]
-                ),
-                required_fields={
-                    "server_status": {
-                        "status": "يجب أن يكون الخادم متاحاً"
-                    }
-                },
-                examples={
-                    "contact_support": {
-                        "suggestion": "يرجى التواصل مع الدعم الفني"
-                    }
-                }
-            )
-        )
-
-
 @router.post("/reset-with-token", response_model=BaseResponse, response_model_exclude_none=True, tags=["Password"])
 def reset_password_with_token(
     reset_data: PasswordResetWithToken = Body(...),
@@ -501,9 +280,15 @@ def reset_password_with_token(
         user.password = hashed_new_password
         db.commit()
         
+        # إبطال التوكن المستعمل
         invalidate_verification_token(reset_data.verification_token)
         
+        # إنشاء توكنات تسجيل الدخول مباشرة
+        tokens = auth_service.create_tokens(user.id, user.user_type)
+        
         return create_unified_success_response(
+            data=tokens,
+            message="تم إعادة تعيين كلمة المرور بنجاح",
             status_code=200,
             path="/api/v1/auth/password/reset-with-token"
         )
@@ -547,3 +332,70 @@ def deprecated_reset_password():
             message="تم إيقاف هذا المسار. استخدم /password/reset-with-token بدلاً من ذلك."
         )
     ) 
+
+@router.post("/forgot", response_model=BaseResponse, response_model_exclude_none=True, tags=["Password"])
+def forgot_password(
+    request_data: PasswordForgotRequest,
+    db: Session = Depends(get_db)
+) -> Any:
+    """إرسال رابط إعادة تعيين كلمة المرور إلى البريد الإلكتروني"""
+
+    try:
+        email = request_data.email.lower().strip()
+        redirect_url = request_data.redirect_url.strip()
+
+        # محاولة العثور على المستخدم، لكن لا نفصح عن وجوده لأسباب أمنية
+        user, user_type = auth_service.get_user_by_email(db, email)
+
+        if user:
+            # إنشاء verification_token للغرض password_reset (يُستخدم مباشرة بدون خطوة OTP Verify)
+            verification_token = generate_verification_token(
+                user_id=user.id,
+                email=email,
+                purpose="password_reset",
+                expires_in_minutes=15
+            )
+
+            # بناء الرابط النهائي مع التوكن
+            separator = '&' if '?' in redirect_url else '?'
+            reset_link = f"{redirect_url}{separator}verification_token={verification_token}"
+
+            # إرسال الرابط عبر البريد
+            send_ok = email_service.send_password_reset_link(email, reset_link)
+
+            if not send_ok:
+                # في حال فشل الإرسال أبطل التوكن
+                invalidate_verification_token(verification_token)
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=create_unified_error_response(
+                        status_code=500,
+                        error_code="email_send_failed",
+                        message="فشل في إرسال رابط إعادة تعيين كلمة المرور",
+                        path="/api/v1/auth/password/forgot"
+                    )
+                )
+
+        # في كل الأحوال نرجع استجابة ناجحة دون كشف وجود المستخدم
+        resp_data = {"email": email}
+        if settings.DEBUG and user:
+            resp_data.update({"verification_token": verification_token, "reset_link": reset_link})
+
+        return create_unified_success_response(
+            data=resp_data,
+            message="إذا كان البريد الإلكتروني موجودًا، سيتم إرسال رابط إعادة تعيين كلمة المرور",
+            status_code=200,
+            path="/api/v1/auth/password/forgot"
+        )
+
+    except Exception as e:
+        import traceback
+        print("Traceback:", traceback.format_exc())
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=create_unified_error_response(
+                status_code=500,
+                error_code="forgot_password_failed",
+                validation_errors=create_validation_error_response(),
+            )
+        ) 

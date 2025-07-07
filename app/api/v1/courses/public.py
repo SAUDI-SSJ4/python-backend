@@ -4,7 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 import random
 
-from app.deps import get_db, get_current_student, get_optional_current_user
+from app.deps.database import get_db
+from app.deps.auth import get_current_student, get_optional_current_user
 
 router = APIRouter()
 
@@ -128,7 +129,7 @@ def generate_course_reviews(course_id: int, limit: int = 5):
 
 
 # Public Courses Routes
-@router.get("/")
+@router.get("/public/courses")
 def get_courses(
     skip: int = Query(0, ge=0),
     limit: int = Query(12, ge=1, le=50),
@@ -195,7 +196,7 @@ def get_courses(
     }
 
 
-@router.get("/featured")
+@router.get("/public/courses/featured")
 def get_featured_courses(
     limit: int = Query(8, ge=1, le=20),
     current_user = Depends(get_optional_current_user)
@@ -215,7 +216,7 @@ def get_featured_courses(
     }
 
 
-@router.get("/search/suggestions")
+@router.get("/public/courses/search/suggestions")
 def get_search_suggestions(
     query: str = Query(..., min_length=2),
     limit: int = Query(10, ge=1, le=20)

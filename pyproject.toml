@@ -29,6 +29,13 @@ google-auth-oauthlib = "^1.1.0"
 google-auth-httplib2 = "^0.1.0"
 # HTTP requests for API calls
 requests = "^2.31.0"
+# Timezone handling
+pytz = "^2024.1"
+# Date utilities
+python-dateutil = "^2.9.0"
+# JWT handling
+pyjwt = "^2.8.0"
+bcrypt = "<4.0.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "8.3.4"

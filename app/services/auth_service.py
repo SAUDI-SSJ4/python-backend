@@ -6,12 +6,13 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
+from jose import jwt
 
 from app.core import security
 from app.core.config import settings
 from app.models.student import Student, StudentStatus
 from app.models.academy import AcademyUser
-from app.models.admin import Admin
+
 
 logger = logging.getLogger(__name__)
 
@@ -32,73 +33,76 @@ class AuthService:
         self.otp_expiry_minutes = 5
         self.reset_token_expiry_hours = 1
     
-    def get_user_by_email(self, db: Session, email: str) -> Tuple[Optional[Union[Student, AcademyUser, Admin]], Optional[str]]:
-        """Get user by email from all tables"""
-        
-        # Check students
-        student = db.query(Student).filter(Student.email == email).first()
-        if student:
-            return student, "student"
-        
-        # Check academies
-        academy = db.query(AcademyUser).filter(AcademyUser.email == email).first()
-        if academy:
-            return academy, "academy"
-        
-        # Check admins
-        admin = db.query(Admin).filter(Admin.email == email).first()
-        if admin:
-            return admin, "admin"
-        
-        # Check unified users table (User model) كحل للمستخدمين المسجلين حديثاً
+    def get_user_by_email(self, db: Session, email: str) -> Tuple[Optional[Any], Optional[str]]:
+        """Get user by email (prefers new unified `User` model)"""
+
+        # 1) Unified `users` table (recommended)
         try:
             from app.models.user import User as UnifiedUser
-            user_generic = db.query(UnifiedUser).filter(UnifiedUser.email == email).first()
-            if user_generic:
-                return user_generic, "student"  # نعاملهم كطلاب لأغراض التوكن
+            user = db.query(UnifiedUser).filter(UnifiedUser.email == email).first()
+            if user:
+                return user, getattr(user, "user_type", None)
         except Exception:
+            # If import fails continue with legacy search
             pass
-        
+
+        # 2) Legacy tables fallback (for backward-compat)
+        student = db.query(Student).join(Student.user).filter(Student.user.has(email=email)).first() if db.bind else None
+        if student:
+            return student.user if hasattr(student, "user") else student, "student"
+
+        academy = db.query(AcademyUser).join(AcademyUser.user).filter(AcademyUser.user.has(email=email)).first() if db.bind else None
+        if academy:
+            return academy.user if hasattr(academy, "user") else academy, "academy"
+
         return None, None
     
-    def get_user_by_phone(self, db: Session, phone: str) -> Tuple[Optional[Union[Student, AcademyUser, Admin]], Optional[str]]:
-        """Get user by phone from all tables"""
-        
-        # Check students
-        student = db.query(Student).filter(Student.phone == phone).first()
-        if student:
-            return student, "student"
-        
-        # Check academies
-        academy = db.query(AcademyUser).filter(AcademyUser.phone == phone).first()
-        if academy:
-            return academy, "academy"
-        
-        # Check admins
-        admin = db.query(Admin).filter(Admin.phone == phone).first()
-        if admin:
-            return admin, "admin"
-        
-        # البحث في جدول User الموحد
+    def get_user_by_phone(self, db: Session, phone: str) -> Tuple[Optional[Any], Optional[str]]:
+        """Get user by phone (prefers new unified `User` model)"""
+
+        # 1) Unified users table
         try:
             from app.models.user import User as UnifiedUser
-            user_generic = db.query(UnifiedUser).filter(UnifiedUser.phone_number == phone).first()
-            if user_generic:
-                return user_generic, "student"
+            
+            user = db.query(UnifiedUser).filter(UnifiedUser.phone_number == phone).first()
+            if user:
+                return user, getattr(user, "user_type", None)
+            
+            user = db.query(UnifiedUser).filter(UnifiedUser.phone_number == phone).first()
+            if user:
+                return user, getattr(user, "user_type", None)
+            
+            user = db.query(UnifiedUser).filter(UnifiedUser.phone_number == phone).first()
+            
+            
+            
+            if user:
+                return user, getattr(user, "user_type", None)
         except Exception:
             pass
-        
+
+        # 2) Legacy fallback
+        student = db.query(Student).join(Student.user).filter(Student.user.has(phone_number=phone)).first() if db.bind else None
+        if student:
+            return student.user if hasattr(student, "user") else student, "student"
+
+        academy = db.query(AcademyUser).join(AcademyUser.user).filter(AcademyUser.user.has(phone_number=phone)).first() if db.bind else None
+        if academy:
+            return academy.user if hasattr(academy, "user") else academy, "academy"
+
+       
+
         return None, None
     
-    def validate_user_status(self, user: Union[Student, AcademyUser, Admin], user_type: str) -> bool:
+    def validate_user_status(self, user: Union[Student, AcademyUser], user_type: str) -> bool:
         """Validate user status"""
         if user_type == "student":
             return user.status == "active"
-        elif user_type in ["academy", "admin"]:
+        elif user_type in ["academy"]:
             return getattr(user, 'is_active', True)
         return False
     
-    def authenticate_user(self, db: Session, email: str, password: str) -> Tuple[Union[Student, AcademyUser, Admin], str]:
+    def authenticate_user(self, db: Session, email: str, password: str) -> Tuple[Union[Student, AcademyUser], str]:
         """Authenticate user with email and password"""
         
         user, user_type = self.get_user_by_email(db, email)
@@ -128,19 +132,14 @@ class AuthService:
     def create_tokens(self, user_id: int, user_type: str) -> Dict[str, str]:
         """Create access and refresh tokens"""
         
-        access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-        refresh_token_expires = timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
-        
+        # استخدام نفس النظام المُتبع في security.py
         access_token = security.create_access_token(
-            subject=str(user_id),
-            user_type=user_type,
-            expires_delta=access_token_expires
+            subject=user_id,
+            user_type=user_type
         )
-        
         refresh_token = security.create_refresh_token(
-            subject=str(user_id),
-            user_type=user_type,
-            expires_delta=refresh_token_expires
+            subject=user_id,
+            user_type=user_type
         )
         
         return {
@@ -265,17 +264,17 @@ class AuthService:
         
         # Update password
         hashed_password = security.get_password_hash(new_password)
-        user.hashed_password = hashed_password
+        user.password = hashed_password
         db.commit()
         
         # Delete token
         del self.reset_tokens[token]
     
-    def change_password(self, db: Session, user: Union[Student, AcademyUser, Admin], user_type: str, old_password: str, new_password: str):
+    def change_password(self, db: Session, user: Union[Student, AcademyUser], user_type: str, old_password: str, new_password: str):
         """Change password for current user"""
         
         # Verify old password
-        if not security.verify_password(old_password, user.hashed_password):
+        if not security.verify_password(old_password, user.password):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Current password is incorrect"
@@ -283,7 +282,7 @@ class AuthService:
         
         # Update password
         hashed_password = security.get_password_hash(new_password)
-        user.hashed_password = hashed_password
+        user.password = hashed_password
         db.commit()
     
     def generate_otp(self) -> str:

@@ -146,3 +146,6 @@ test.db
 
 # Alembic
 alembic/versions/ 
+
+/static/
+/venv/

@@ -242,7 +242,7 @@ def get_course_details(
     course_id: int,
     current_user = Depends(get_optional_current_user)
 ) -> Any:
-    """Get detailed course information"""
+    """Get course details for public view"""
     course = generate_mock_course_public(course_id)
     
     # Add curriculum
@@ -298,7 +298,8 @@ def get_course_details(
             "title": "Variables and Data Types"
         } if course["is_enrolled"] else None
     
-    return course
+    from app.schemas.course import CourseDetailResponse
+    return CourseDetailResponse(**course)
 
 
 @router.post("/{course_id}/enroll")

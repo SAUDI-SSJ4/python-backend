@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Enum, Text
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Enum, Text, BigInteger, ForeignKey
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from enum import Enum as PyEnum
@@ -8,6 +8,7 @@ from app.db.base import Base
 class UserType(PyEnum):
     STUDENT = "student"
     ACADEMY = "academy"
+    ADMIN = "admin"
 
 
 class AccountType(PyEnum):
@@ -17,21 +18,22 @@ class AccountType(PyEnum):
 
 class UserStatus(PyEnum):
     ACTIVE = "active"
-    INACTIVE = "inactive"
-    BLOCKED = "blocked"
     PENDING_VERIFICATION = "pending_verification"
+    SUSPENDED = "suspended"
+    BLOCKED = "blocked"
 
 
 class User(Base):
     __tablename__ = "users"
 
-    id = Column(Integer, primary_key=True, index=True)
-    fname = Column(String(50), nullable=False)
-    mname = Column(String(50), nullable=True)
-    lname = Column(String(50), nullable=False)
+    id = Column(BigInteger, primary_key=True, index=True)
+    fname = Column(String(255), nullable=False)
+    mname = Column(String(255), nullable=True)
+    lname = Column(String(255), nullable=False)
     email = Column(String(100), unique=True, index=True, nullable=False)
     phone_number = Column(String(20), unique=True, index=True, nullable=True)
     password = Column(String(255), nullable=True)
+    token = Column(String(255), nullable=True)
     
     # User classification
     user_type = Column(String(20), nullable=False)  # Using String instead of Enum
@@ -48,8 +50,8 @@ class User(Base):
     avatar = Column(String(255), nullable=True)
     banner = Column(String(255), nullable=True)
     
-    # Referral system
-    refere_id = Column(String(50), nullable=True)
+    # Referral system - تصحيح نوع البيانات ليتوافق مع قاعدة البيانات
+    refere_id = Column(BigInteger, ForeignKey("users.id"), nullable=True)
     
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -57,9 +59,18 @@ class User(Base):
     
     # Relationships
     student_profile = relationship("Student", back_populates="user", uselist=False)
-    academy_profile = relationship("Academy", back_populates="user", uselist=False)
     academy_memberships = relationship("AcademyUser", back_populates="user")
     otps = relationship("OTP", back_populates="user")
+    
+    # Self-referential relationship for referrals
+    referrer = relationship("User", remote_side=[id], backref="referred_users")
+
+    @property
+    def academy(self):
+        """Get the academy associated with this user"""
+        if self.user_type == "academy" and self.academy_memberships:
+            return self.academy_memberships[0].academy
+        return None
 
     def __repr__(self):
         return f"<User(id={self.id}, email='{self.email}', user_type='{self.user_type}')>"
