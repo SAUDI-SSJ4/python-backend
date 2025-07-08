@@ -133,6 +133,7 @@ def generate_course_reviews(course_id: int, limit: int = 5):
 def get_courses(
     skip: int = Query(0, ge=0),
     limit: int = Query(12, ge=1, le=50),
+    academy_id: Optional[int] = Query(None, description="Filter by academy ID"),
     search: Optional[str] = None,
     category: Optional[str] = None,
     level: Optional[str] = None,
@@ -144,56 +145,66 @@ def get_courses(
     current_user = Depends(get_optional_current_user)
 ) -> Any:
     """Get list of all courses (public endpoint)"""
-    courses = [generate_mock_course_public(i) for i in range(1, 51)]
-    
-    # Apply filters
-    if search:
-        courses = [c for c in courses if search.lower() in c["title"].lower() or search.lower() in c["description"].lower()]
-    
-    if category:
-        # Mock category filtering
-        courses = [c for c in courses if category.lower() in " ".join(c["tags"]).lower()]
-    
-    if level:
-        courses = [c for c in courses if c["level"] == level.upper()]
-    
-    if price_min is not None:
-        courses = [c for c in courses if c["final_price"] >= price_min]
-    
-    if price_max is not None:
-        courses = [c for c in courses if c["final_price"] <= price_max]
-    
-    if is_free is not None:
-        courses = [c for c in courses if c["is_free"] == is_free]
-    
-    # Sort courses
-    reverse = order == "desc"
-    if sort_by == "popularity":
-        courses.sort(key=lambda x: x["enrollment_count"], reverse=reverse)
-    elif sort_by == "rating":
-        courses.sort(key=lambda x: x["rating"], reverse=reverse)
-    elif sort_by == "price":
-        courses.sort(key=lambda x: x["final_price"], reverse=reverse)
-    else:
-        courses.sort(key=lambda x: x[sort_by], reverse=reverse)
-    
-    # Add enrollment status for authenticated users
-    if current_user:
-        for course in courses:
-            course["is_enrolled"] = course["id"] % 7 == 0  # Mock enrollment check
-            course["progress"] = random.randint(0, 100) if course["is_enrolled"] else 0
-    
-    return {
-        "data": courses[skip:skip + limit],
-        "total": len(courses),
-        "skip": skip,
-        "limit": limit,
-        "filters": {
-            "categories": ["Programming", "Design", "Marketing", "Business", "Technology"],
-            "levels": ["BEGINNER", "INTERMEDIATE", "ADVANCED"],
-            "price_range": {"min": 0, "max": 500}
+    try:
+        courses = [generate_mock_course_public(i) for i in range(1, 51)]
+        
+        # Apply filters
+        if academy_id:
+            courses = [c for c in courses if c["academy"]["id"] == academy_id]
+        
+        if search:
+            courses = [c for c in courses if search.lower() in c["title"].lower() or search.lower() in c["description"].lower()]
+        
+        if category:
+            courses = [c for c in courses if category.lower() in " ".join(c["tags"]).lower()]
+        
+        if level:
+            courses = [c for c in courses if c["level"] == level.upper()]
+        
+        if price_min is not None:
+            courses = [c for c in courses if c["final_price"] >= price_min]
+        
+        if price_max is not None:
+            courses = [c for c in courses if c["final_price"] <= price_max]
+        
+        if is_free is not None:
+            courses = [c for c in courses if c["is_free"] == is_free]
+        
+        # Sort courses
+        reverse = order == "desc"
+        if sort_by == "popularity":
+            courses.sort(key=lambda x: x["enrollment_count"], reverse=reverse)
+        elif sort_by == "rating":
+            courses.sort(key=lambda x: x["rating"], reverse=reverse)
+        elif sort_by == "price":
+            courses.sort(key=lambda x: x["final_price"], reverse=reverse)
+        else:
+            courses.sort(key=lambda x: x[sort_by], reverse=reverse)
+        
+        # Add enrollment status for authenticated users
+        if current_user:
+            for course in courses:
+                course["is_enrolled"] = course["id"] % 7 == 0
+                course["progress"] = random.randint(0, 100) if course["is_enrolled"] else 0
+        
+        return {
+            "data": courses[skip:skip + limit],
+            "total": len(courses),
+            "skip": skip,
+            "limit": limit,
+            "filters": {
+                "categories": ["Programming", "Design", "Marketing", "Business", "Technology"],
+                "levels": ["BEGINNER", "INTERMEDIATE", "ADVANCED"],
+                "price_range": {"min": 0, "max": 500}
+            }
         }
-    }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Error retrieving courses: {str(e)}",
+            "data": [],
+            "total": 0
+        }
 
 
 @router.get("/public/courses/featured")
@@ -202,18 +213,26 @@ def get_featured_courses(
     current_user = Depends(get_optional_current_user)
 ) -> Any:
     """Get featured courses"""
-    courses = [generate_mock_course_public(i) for i in range(1, 21) if i <= 8]
-    
-    # Add enrollment status for authenticated users
-    if current_user:
-        for course in courses:
-            course["is_enrolled"] = course["id"] % 7 == 0
-            course["progress"] = random.randint(0, 100) if course["is_enrolled"] else 0
-    
-    return {
-        "data": courses[:limit],
-        "total": len(courses)
-    }
+    try:
+        courses = [generate_mock_course_public(i) for i in range(1, 21) if i <= 8]
+        
+        # Add enrollment status for authenticated users
+        if current_user:
+            for course in courses:
+                course["is_enrolled"] = course["id"] % 7 == 0
+                course["progress"] = random.randint(0, 100) if course["is_enrolled"] else 0
+        
+        return {
+            "data": courses[:limit],
+            "total": len(courses)
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Error retrieving featured courses: {str(e)}",
+            "data": [],
+            "total": 0
+        }
 
 
 @router.get("/public/courses/search/suggestions")

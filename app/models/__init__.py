@@ -15,7 +15,7 @@ from .product import Product, DigitalProduct, Package, StudentProduct, ProductSt
 from .chapter import Chapter
 from .lesson import Lesson, LessonType, VideoType
 from .video import Video
-from .cart import Cart
+from .cart import Cart, CartSession
 from .payment import (
     Invoice, InvoiceProduct, Payment, PaymentGatewayLog, 
     CouponUsage, PaymentStatus, PaymentGateway
@@ -44,6 +44,8 @@ __all__ = [
     "Course", "CourseStatus", "CourseType", "CourseLevel", "Category",
     "Product", "DigitalProduct", "Package", "StudentProduct", "ProductStatus", "ProductType", "PackageType",
     "Chapter", "Lesson", "LessonType", "VideoType",
-    "Video", "Exam", "Question", "QuestionOption", "QuestionType",
+    "Video", "Cart", "CartSession",
+    "Invoice", "InvoiceProduct", "Payment", "PaymentGatewayLog", "CouponUsage", "PaymentStatus", "PaymentGateway",
+    "Exam", "Question", "QuestionOption", "QuestionType",
     "InteractiveTool", "LessonProgress", "StudentCourse", "AIAnswer"
 ] 

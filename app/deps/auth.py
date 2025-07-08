@@ -1,5 +1,5 @@
 from typing import Optional
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from jose import jwt, JWTError
@@ -14,6 +14,8 @@ from app.models.student import Student
 from sqlalchemy.orm import joinedload
 
 security_scheme = HTTPBearer()
+optional_security_scheme = HTTPBearer(auto_error=False)
+optional_security_scheme = HTTPBearer(auto_error=False)
 
 
 async def get_current_user(
@@ -72,7 +74,6 @@ async def get_current_user(
         
         user_id: int = int(payload.get("sub"))
         
-        # البحث في User table أولاً
         user = db.query(User).filter(User.id == user_id).first()
             
         if user is None:
@@ -87,7 +88,6 @@ async def get_current_user(
                 }
             )
             
-        # التحقق من حالة المستخدم
         if user.status == "blocked":
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -142,7 +142,6 @@ async def get_current_academy_user(
     """Get current academy user with academy information."""
     user = await get_current_user(credentials, db)
     
-    # تحقق من أن المستخدم من نوع academy
     if user.user_type != "academy":
         from datetime import datetime
         raise HTTPException(
@@ -156,7 +155,6 @@ async def get_current_academy_user(
             }
         )
     
-    # تحقق من وجود معلومات الأكاديمية
     if not user.academy:
         from datetime import datetime
         raise HTTPException(
@@ -182,7 +180,7 @@ async def get_current_student(
 
 
 async def get_optional_current_user(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_scheme),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(optional_security_scheme),
     db: Session = Depends(get_db)
 ) -> Optional[dict]:
     """

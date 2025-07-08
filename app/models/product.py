@@ -95,6 +95,7 @@ class DigitalProduct(Base):
     academy = relationship("Academy")
     student_digital_products = relationship("StudentDigitalProduct", back_populates="digital_product")
     ratings = relationship("DigitalProductRating", back_populates="digital_product")
+    cart_items = relationship("Cart", back_populates="digital_product")
 
 
 class StudentDigitalProduct(Base):

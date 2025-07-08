@@ -69,7 +69,7 @@ def get_cart(
         )
 
 
-@router.post("/add")
+@router.post("/add", status_code=status.HTTP_201_CREATED)
 def add_to_cart(
     cart_data: AddToCartRequest,
     request: Request,

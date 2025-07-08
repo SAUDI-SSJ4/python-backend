@@ -52,7 +52,7 @@ async def get_course_chapters(
     )
 
 
-@router.post("/academy/courses/{course_id}/chapters", response_model=ChapterResponse)
+@router.post("/academy/courses/{course_id}/chapters", response_model=ChapterResponse, status_code=status.HTTP_201_CREATED)
 async def create_chapter(
     course_id: str,
     chapter_data: ChapterCreate,

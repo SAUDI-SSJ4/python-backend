@@ -364,7 +364,7 @@ def handle_google_login(google_request, db: Session) -> Token:
     return generate_user_tokens(user, db)
 
 
-@router.post("/register", response_model=Token, response_model_exclude_none=True, tags=["Authentication"])
+@router.post("/register", response_model=Token, response_model_exclude_none=True, status_code=status.HTTP_201_CREATED, tags=["Authentication"])
 async def unified_register(
     fname: str = Form(..., description="الاسم الأول"),
     lname: str = Form(..., description="الاسم الأخير"), 

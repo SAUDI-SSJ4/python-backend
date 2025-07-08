@@ -366,18 +366,89 @@ class CourseDetailResponse(CourseResponse):
 
 class CourseFilters(BaseModel):
     """Schema for course filtering and search"""
-    academy_id: Optional[int] = Field(None, description="Filter by academy")
-    category_id: Optional[int] = Field(None, description="Filter by category")
-    trainer_id: Optional[int] = Field(None, description="Filter by trainer")
-    status: Optional[CourseStatusEnum] = Field(None, description="Filter by status")
-    type: Optional[CourseTypeEnum] = Field(None, description="Filter by type")
-    level: Optional[CourseLevelEnum] = Field(None, description="Filter by level")
-    price_from: Optional[Decimal] = Field(None, ge=0, description="Minimum price")
-    price_to: Optional[Decimal] = Field(None, ge=0, description="Maximum price")
-    featured: Optional[bool] = Field(None, description="Filter featured courses")
-    search: Optional[str] = Field(None, min_length=2, max_length=100, description="Search query")
-    page: int = Field(1, ge=1, description="Page number")
-    per_page: int = Field(10, ge=1, le=100, description="Items per page")
+    academy_id: Optional[int] = Field(
+        None, 
+        description="Filter courses by specific academy ID (e.g., 49 for academy 49)",
+        example=49,
+        ge=1
+    )
+    category_id: Optional[int] = Field(
+        None, 
+        description="Filter courses by category ID",
+        example=1,
+        ge=1
+    )
+    trainer_id: Optional[int] = Field(
+        None, 
+        description="Filter courses by trainer ID",
+        example=1,
+        ge=1
+    )
+    status: Optional[CourseStatusEnum] = Field(
+        None, 
+        description="Filter by course status (draft, published, archived)",
+        example="published"
+    )
+    type: Optional[CourseTypeEnum] = Field(
+        None, 
+        description="Filter by course type (live, recorded, attend)",
+        example="recorded"
+    )
+    level: Optional[CourseLevelEnum] = Field(
+        None, 
+        description="Filter by course level (beginner, intermediate, advanced)",
+        example="beginner"
+    )
+    price_from: Optional[Decimal] = Field(
+        None, 
+        ge=0, 
+        description="Minimum price filter (e.g., 100.00)",
+        example=100.00
+    )
+    price_to: Optional[Decimal] = Field(
+        None, 
+        ge=0, 
+        description="Maximum price filter (e.g., 500.00)",
+        example=500.00
+    )
+    featured: Optional[bool] = Field(
+        None, 
+        description="Filter featured courses only (true/false)",
+        example=True
+    )
+    search: Optional[str] = Field(
+        None, 
+        min_length=2, 
+        max_length=100, 
+        description="Search in course title and description",
+        example="python"
+    )
+    page: int = Field(
+        1, 
+        ge=1, 
+        description="Page number for pagination",
+        example=1
+    )
+    per_page: int = Field(
+        10, 
+        ge=1, 
+        le=100, 
+        description="Number of items per page (1-100)",
+        example=10
+    )
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "academy_id": 49,
+                "category_id": 1,
+                "level": "beginner",
+                "featured": True,
+                "search": "python",
+                "page": 1,
+                "per_page": 10
+            }
+        }
 
     @validator('price_to')
     def validate_price_range(cls, v, values):

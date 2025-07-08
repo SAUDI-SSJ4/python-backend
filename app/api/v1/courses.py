@@ -132,6 +132,7 @@ def generate_course_reviews(course_id: int, limit: int = 5):
 def get_courses(
     skip: int = Query(0, ge=0),
     limit: int = Query(12, ge=1, le=50),
+    academy_id: Optional[int] = Query(None, description="Filter courses by academy ID", example=49),
     search: Optional[str] = None,
     category: Optional[str] = None,
     level: Optional[str] = None,
@@ -142,10 +143,24 @@ def get_courses(
     order: str = Query("desc", pattern="^(asc|desc)$"),
     current_user = Depends(get_optional_current_user)
 ) -> Any:
-    """Get list of all courses (public endpoint)"""
+    """
+    Get list of all courses (public endpoint)
+    
+    Available filters:
+    - academy_id: Filter courses by specific academy ID
+    - search: Search in course title and description
+    - category: Filter by category
+    - level: Filter by level (BEGINNER, INTERMEDIATE, ADVANCED)
+    - price_min/price_max: Price range filter
+    - is_free: Filter free courses only
+    """
     courses = [generate_mock_course_public(i) for i in range(1, 51)]
     
-    # Apply filters
+    # Apply academy_id filter
+    if academy_id is not None:
+        courses = [c for c in courses if c["academy"]["id"] == academy_id]
+    
+    # Apply other filters
     if search:
         courses = [c for c in courses if search.lower() in c["title"].lower() or search.lower() in c["description"].lower()]
     

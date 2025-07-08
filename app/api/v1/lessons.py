@@ -29,7 +29,7 @@ from app.core.response_handler import SayanSuccessResponse
 router = APIRouter()
 file_service = FileService()
 
-@router.post("/{chapter_id}", response_model=LessonResponse)
+@router.post("/{chapter_id}", response_model=LessonResponse, status_code=status.HTTP_201_CREATED)
 async def create_lesson(
     chapter_id: str,
     lesson_data: LessonCreate,
