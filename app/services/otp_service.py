@@ -357,9 +357,8 @@ class OTPService:
     
     @staticmethod
     def send_otp_sms(phone: str, code: str, purpose: str) -> bool:
-        """إرسال OTP عبر SMS مع تخصيص حسب النوع"""
+        """Send OTP via SMS with purpose-specific customization"""
         try:
-            # خريطة الأغراض بالعربية
             purpose_map = {
                 "login": "تسجيل الدخول",
                 "password_reset": "إعادة تعيين كلمة المرور",
@@ -370,13 +369,11 @@ class OTPService:
             
             arabic_purpose = purpose_map.get(purpose, "التحقق")
             
-            # رسالة SMS مخصصة
             if purpose in ["payment_confirmation", "account_deletion"]:
                 message = f"رمز {arabic_purpose}: {code}\nلا تشاركه مع أحد. صالح لدقائق قليلة.\n- منصة سَيان"
             else:
                 message = f"رمز {arabic_purpose}: {code}\nصالح لدقائق قليلة.\n- منصة سَيان"
             
-            # TODO: تكامل مع خدمة SMS حقيقية
             print(f"SMS OTP: {message} إلى {phone}")
             
             return True
@@ -386,7 +383,7 @@ class OTPService:
     
     @staticmethod
     def cleanup_expired_otps(db: Session) -> int:
-        """تنظيف رموز OTP المنتهية الصلاحية"""
+        """Clean up expired OTP codes"""
         
         deleted_count = db.query(OTP).filter(
             OTP.expires_at < datetime.utcnow()
@@ -401,7 +398,7 @@ class OTPService:
         user_id: int,
         purpose: OTPPurpose
     ) -> Optional[OTP]:
-        """الحصول على OTP نشط للمستخدم والغرض المحدد"""
+        """Get active OTP for user and specific purpose"""
         
         return db.query(OTP).filter(
             and_(
@@ -414,8 +411,7 @@ class OTPService:
     
     @staticmethod
     def _log_otp_creation(db: Session, user_id: int, purpose: OTPPurpose):
-        """تسجيل إحصائيات إنشاء OTP"""
-        # TODO: إضافة جدول إحصائيات منفصل
+        """Log OTP creation statistics"""
         pass
     
     @staticmethod
@@ -425,8 +421,7 @@ class OTPService:
         purpose: OTPPurpose, 
         success: bool
     ):
-        """تسجيل محاولات التحقق"""
-        # TODO: إضافة جدول سجل الأمان
+        """Log verification attempts for security monitoring"""
         pass
     
     @staticmethod

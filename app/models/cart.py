@@ -1,75 +1,80 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Numeric
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Numeric, Text, Enum
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from datetime import datetime
 import uuid
+import enum
 
 from app.db.base import Base
 
 
+class ItemType(str, enum.Enum):
+    COURSE = "course"
+    DIGITAL_PRODUCT = "digital_product"
+
+
 class Cart(Base):
-    """نموذج السلة لإدارة عناصر الشراء"""
     __tablename__ = "carts"
 
     id = Column(Integer, primary_key=True, index=True)
-    
-    # معرف الطالب (للمستخدمين المسجلين)
     student_id = Column(Integer, ForeignKey("students.id"), nullable=True, index=True)
-    
-    # معرف الجلسة (للضيوف)
+    cookie_id = Column(String(255), nullable=True, index=True)
     session_id = Column(String(255), nullable=True, index=True)
-    
-    # معرف الكورس
-    course_id = Column(String(255), ForeignKey("courses.id"), nullable=False, index=True)
-    
-    # معرف الأكاديمية
+    item_type = Column(Enum(ItemType), nullable=False, default=ItemType.COURSE)
+    item_id = Column(String(255), nullable=False, index=True)
+    course_id = Column(String(255), ForeignKey("courses.id"), nullable=True, index=True)
+    digital_product_id = Column(Integer, ForeignKey("digital_products.id"), nullable=True, index=True)
     academy_id = Column(Integer, ForeignKey("academies.id"), nullable=True, index=True)
-    
-    # الكمية
     quantity = Column(Integer, default=1, nullable=False)
-    
-    # السعر وقت الإضافة
     price = Column(Numeric(10, 2), nullable=True)
     price_at_time = Column(Numeric(10, 2), nullable=True)
-    
-    # تواريخ النظام
+    extra_data = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
-    
-    # Soft delete
     deleted_at = Column(DateTime(timezone=True), nullable=True)
     
-    # العلاقات
     student = relationship("Student", back_populates="cart_items")
     course = relationship("Course", back_populates="cart_items")
+    digital_product = relationship("DigitalProduct", back_populates="cart_items")
     academy = relationship("Academy")
     
     @property
+    def item(self):
+        if self.item_type == ItemType.COURSE:
+            return self.course
+        elif self.item_type == ItemType.DIGITAL_PRODUCT:
+            return self.digital_product
+        return None
+    
+    @property
     def total_price(self):
-        """حساب السعر الإجمالي للعنصر"""
         price = self.price or self.price_at_time or 0
         return float(price) * self.quantity
     
     def soft_delete(self):
-        """حذف ناعم للعنصر"""
         self.deleted_at = datetime.utcnow()
     
     @property
     def is_deleted(self):
-        """فحص إذا كان العنصر محذوف"""
         return self.deleted_at is not None
     
-    def __repr__(self):
-        return f"<Cart(id={self.id}, student_id={self.student_id}, course_id={self.course_id})>"
+    def get_item_details(self):
+        item = self.item
+        if item:
+            return {
+                'id': item.id,
+                'title': getattr(item, 'title', 'غير متوفر'),
+                'price': getattr(item, 'price', 0),
+                'image': getattr(item, 'image', None),
+                'description': getattr(item, 'description', '')
+            }
+        return None
 
 
 class CartSession(Base):
-    """نموذج جلسات السلة للضيوف"""
     __tablename__ = "cart_sessions"
     
     id = Column(String(255), primary_key=True, default=lambda: str(uuid.uuid4()))
+    cookie_id = Column(String(255), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    expires_at = Column(DateTime(timezone=True), nullable=False)
-    
-    def __repr__(self):
-        return f"<CartSession(id={self.id}, expires_at={self.expires_at})>" 
+    expires_at = Column(DateTime(timezone=True), nullable=False) 

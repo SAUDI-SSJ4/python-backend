@@ -11,6 +11,7 @@ import hmac
 import hashlib
 from datetime import datetime
 import uuid
+import base64
 
 from app.models.payment import Payment, PaymentGatewayLog, PaymentStatus, PaymentGateway
 from app.models.cart import Cart
@@ -19,273 +20,224 @@ from app.core.config import settings
 
 
 class MoyasarService:
-    """
-    Service for handling Moyasar payment gateway operations.
-    """
     
     def __init__(self, db: Session):
         self.db = db
         self.api_key = settings.MOYASAR_API_KEY
         self.webhook_secret = settings.MOYASAR_WEBHOOK_SECRET
         self.base_url = "https://api.moyasar.com/v1"
-        self.headers = {
-            "Authorization": f"Basic {self.api_key}",
-            "Content-Type": "application/json"
-        }
+        self.timeout = 30
+        
+        if not self.api_key:
+            raise ValueError("MOYASAR_API_KEY is not configured")
     
-    def create_payment_intent(
+    def create_invoice(
         self,
-        amount: Decimal,
+        amount: int,
         currency: str = "SAR",
-        description: str = "Course purchase",
-        customer_info: Dict[str, Any] = None,
-        metadata: Dict[str, Any] = None
+        description: str = "Payment",
+        success_url: Optional[str] = None,
+        back_url: Optional[str] = None,
+        callback_url: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """
-        Create a payment intent with Moyasar.
-        """
-        # Convert amount to halalas (smallest currency unit)
-        amount_halalas = int(amount * 100)
-        
-        payment_data = {
-            "amount": amount_halalas,
-            "currency": currency,
-            "description": description,
-            "metadata": metadata or {}
-        }
-        
-        # Add customer information if provided
-        if customer_info:
-            payment_data.update({
-                "source": {
-                    "type": "creditcard",
-                    "name": customer_info.get("name", ""),
-                    "number": customer_info.get("card_number", ""),
-                    "cvc": customer_info.get("cvc", ""),
-                    "month": customer_info.get("exp_month", ""),
-                    "year": customer_info.get("exp_year", "")
-                }
-            })
-        
         try:
+            headers = {
+                "Authorization": f"Basic {base64.b64encode(f'{self.api_key}:'.encode()).decode()}",
+                "Content-Type": "application/json"
+            }
+            
+            payload = {
+                "amount": amount,
+                "currency": currency,
+                "description": description,
+                "publishable_api_key": self.api_key,
+                "callback_url": callback_url,
+                "success_url": success_url,
+                "back_url": back_url,
+                "metadata": metadata or {}
+            }
+            
             response = requests.post(
-                f"{self.base_url}/payments",
-                headers=self.headers,
-                json=payment_data,
-                timeout=30
+                f"{self.base_url}/invoices",
+                json=payload,
+                headers=headers,
+                timeout=self.timeout
             )
             
-            response_data = response.json()
-            
-            # Log the request and response
-            self._log_gateway_interaction(
-                payment_id=None,
-                request_data=payment_data,
-                response_data=response_data,
-                status=response_data.get("status", "unknown"),
-                response_code=str(response.status_code)
+            log_entry = PaymentGatewayLog(
+                gateway=PaymentGateway.MOYASAR,
+                operation="create_invoice",
+                request_data=json.dumps(payload),
+                response_data=response.text,
+                http_status=response.status_code,
+                success=response.status_code == 201
             )
+            self.db.add(log_entry)
+            self.db.commit()
             
             if response.status_code == 201:
+                invoice_data = response.json()
                 return {
                     "success": True,
-                    "payment_id": response_data.get("id"),
-                    "status": response_data.get("status"),
-                    "amount": response_data.get("amount"),
-                    "currency": response_data.get("currency"),
-                    "source": response_data.get("source", {}),
-                    "transaction_url": response_data.get("transaction_url"),
-                    "data": response_data
+                    "invoice_id": invoice_data["id"],
+                    "status": invoice_data["status"],
+                    "payment_url": invoice_data.get("url"),
+                    "amount": invoice_data["amount"],
+                    "currency": invoice_data["currency"],
+                    "expires_at": invoice_data.get("expires_at"),
+                    "data": invoice_data
                 }
             else:
+                error_data = response.json() if response.headers.get("content-type", "").startswith("application/json") else {}
                 return {
                     "success": False,
-                    "error": response_data.get("message", "Payment creation failed"),
-                    "error_code": response_data.get("type"),
-                    "data": response_data
+                    "error": error_data.get("message", "فشل في إنشاء الفاتورة"),
+                    "error_code": error_data.get("type", "unknown_error"),
+                    "data": error_data
                 }
-        
+                
         except requests.exceptions.RequestException as e:
+            log_entry = PaymentGatewayLog(
+                gateway=PaymentGateway.MOYASAR,
+                operation="create_invoice",
+                request_data=json.dumps(payload) if 'payload' in locals() else "{}",
+                response_data=f"Request failed: {str(e)}",
+                http_status=0,
+                success=False
+            )
+            self.db.add(log_entry)
+            self.db.commit()
+            
             return {
                 "success": False,
-                "error": f"Network error: {str(e)}",
-                "error_code": "network_error"
+                "error": f"فشل في الاتصال بـ Moyasar: {str(e)}",
+                "error_code": "connection_error"
             }
         except Exception as e:
             return {
                 "success": False,
-                "error": f"Unexpected error: {str(e)}",
+                "error": f"خطأ غير متوقع: {str(e)}",
                 "error_code": "unexpected_error"
             }
     
-    def verify_payment(self, payment_id: str) -> Dict[str, Any]:
-        """
-        Verify payment status with Moyasar.
-        """
+    def get_invoice_status(self, invoice_id: str) -> Dict[str, Any]:
         try:
+            headers = {
+                "Authorization": f"Basic {base64.b64encode(f'{self.api_key}:'.encode()).decode()}",
+                "Content-Type": "application/json"
+            }
+            
             response = requests.get(
-                f"{self.base_url}/payments/{payment_id}",
-                headers=self.headers,
-                timeout=30
+                f"{self.base_url}/invoices/{invoice_id}",
+                headers=headers,
+                timeout=self.timeout
             )
             
-            response_data = response.json()
-            
-            # Log the verification request
-            self._log_gateway_interaction(
-                payment_id=payment_id,
-                request_data={"action": "verify_payment"},
-                response_data=response_data,
-                status=response_data.get("status", "unknown"),
-                response_code=str(response.status_code)
+            log_entry = PaymentGatewayLog(
+                gateway=PaymentGateway.MOYASAR,
+                operation="get_invoice_status",
+                request_data=json.dumps({"invoice_id": invoice_id}),
+                response_data=response.text,
+                http_status=response.status_code,
+                success=response.status_code == 200
             )
+            self.db.add(log_entry)
+            self.db.commit()
             
             if response.status_code == 200:
+                invoice_data = response.json()
                 return {
                     "success": True,
-                    "payment_id": response_data.get("id"),
-                    "status": response_data.get("status"),
-                    "amount": response_data.get("amount"),
-                    "currency": response_data.get("currency"),
-                    "paid_at": response_data.get("paid_at"),
-                    "source": response_data.get("source", {}),
-                    "metadata": response_data.get("metadata", {}),
-                    "data": response_data
+                    "status": invoice_data["status"],
+                    "amount": invoice_data["amount"],
+                    "currency": invoice_data["currency"],
+                    "paid_at": invoice_data.get("paid_at"),
+                    "data": invoice_data
                 }
             else:
+                error_data = response.json() if response.headers.get("content-type", "").startswith("application/json") else {}
                 return {
                     "success": False,
-                    "error": response_data.get("message", "Payment verification failed"),
-                    "error_code": response_data.get("type"),
-                    "data": response_data
+                    "error": error_data.get("message", "فشل في الاستعلام عن الفاتورة"),
+                    "error_code": error_data.get("type", "unknown_error"),
+                    "data": error_data
                 }
-        
+                
         except requests.exceptions.RequestException as e:
+            log_entry = PaymentGatewayLog(
+                gateway=PaymentGateway.MOYASAR,
+                operation="get_invoice_status",
+                request_data=json.dumps({"invoice_id": invoice_id}),
+                response_data=f"Request failed: {str(e)}",
+                http_status=0,
+                success=False
+            )
+            self.db.add(log_entry)
+            self.db.commit()
+            
             return {
                 "success": False,
-                "error": f"Network error: {str(e)}",
-                "error_code": "network_error"
+                "error": f"فشل في الاتصال بـ Moyasar: {str(e)}",
+                "error_code": "connection_error"
             }
         except Exception as e:
             return {
                 "success": False,
-                "error": f"Unexpected error: {str(e)}",
+                "error": f"خطأ غير متوقع: {str(e)}",
                 "error_code": "unexpected_error"
             }
     
-    def refund_payment(
-        self,
-        payment_id: str,
-        amount: Optional[Decimal] = None,
-        reason: str = "Refund requested"
-    ) -> Dict[str, Any]:
-        """
-        Refund a payment through Moyasar.
-        """
-        refund_data = {
-            "reason": reason
-        }
-        
-        if amount:
-            # Convert amount to halalas
-            refund_data["amount"] = int(amount * 100)
-        
+    def process_webhook(self, payload: bytes, signature: str) -> Dict[str, Any]:
         try:
-            response = requests.post(
-                f"{self.base_url}/payments/{payment_id}/refund",
-                headers=self.headers,
-                json=refund_data,
-                timeout=30
-            )
-            
-            response_data = response.json()
-            
-            # Log the refund request
-            self._log_gateway_interaction(
-                payment_id=payment_id,
-                request_data=refund_data,
-                response_data=response_data,
-                status=response_data.get("status", "unknown"),
-                response_code=str(response.status_code)
-            )
-            
-            if response.status_code == 200:
-                return {
-                    "success": True,
-                    "refund_id": response_data.get("id"),
-                    "status": response_data.get("status"),
-                    "amount": response_data.get("amount"),
-                    "currency": response_data.get("currency"),
-                    "refunded_at": response_data.get("refunded_at"),
-                    "data": response_data
-                }
-            else:
+            if not self.webhook_secret:
                 return {
                     "success": False,
-                    "error": response_data.get("message", "Refund failed"),
-                    "error_code": response_data.get("type"),
-                    "data": response_data
+                    "error": "Webhook secret not configured",
+                    "error_code": "configuration_error"
                 }
-        
-        except requests.exceptions.RequestException as e:
-            return {
-                "success": False,
-                "error": f"Network error: {str(e)}",
-                "error_code": "network_error"
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "error": f"Unexpected error: {str(e)}",
-                "error_code": "unexpected_error"
-            }
-    
-    def process_webhook(
-        self,
-        payload: bytes,
-        signature: str
-    ) -> Dict[str, Any]:
-        """
-        Process Moyasar webhook payload.
-        """
-        # Verify webhook signature
-        if not self._verify_webhook_signature(payload, signature):
-            return {
-                "success": False,
-                "error": "Invalid webhook signature",
-                "error_code": "invalid_signature"
-            }
-        
-        try:
-            # Parse webhook payload
-            webhook_data = json.loads(payload.decode('utf-8'))
+            
+            expected_signature = hmac.new(
+                self.webhook_secret.encode(),
+                payload,
+                hashlib.sha256
+            ).hexdigest()
+            
+            if not hmac.compare_digest(signature, expected_signature):
+                return {
+                    "success": False,
+                    "error": "Invalid webhook signature",
+                    "error_code": "invalid_signature"
+                }
+            
+            webhook_data = json.loads(payload.decode())
+            
+            log_entry = PaymentGatewayLog(
+                gateway=PaymentGateway.MOYASAR,
+                operation="process_webhook",
+                request_data=payload.decode(),
+                response_data=json.dumps(webhook_data),
+                http_status=200,
+                success=True
+            )
+            self.db.add(log_entry)
             
             event_type = webhook_data.get("type")
-            payment_data = webhook_data.get("data", {})
             
-            # Log webhook received
-            self._log_gateway_interaction(
-                payment_id=payment_data.get("id"),
-                request_data={"webhook_type": event_type},
-                response_data=webhook_data,
-                status=event_type,
-                response_code="200"
-            )
-            
-            # Process different webhook events
-            if event_type == "payment_paid":
-                return self._handle_payment_paid(payment_data)
-            elif event_type == "payment_failed":
-                return self._handle_payment_failed(payment_data)
-            elif event_type == "payment_refunded":
-                return self._handle_payment_refunded(payment_data)
+            if event_type == "invoice_paid":
+                result = self._handle_invoice_paid(webhook_data)
+            elif event_type == "invoice_failed":
+                result = self._handle_invoice_failed(webhook_data)
             else:
-                return {
+                result = {
                     "success": True,
-                    "message": f"Webhook event {event_type} received but not processed",
+                    "message": f"Webhook event '{event_type}' received but not processed",
                     "event_type": event_type
                 }
-        
+            
+            self.db.commit()
+            return result
+            
         except json.JSONDecodeError:
             return {
                 "success": False,
@@ -295,210 +247,129 @@ class MoyasarService:
         except Exception as e:
             return {
                 "success": False,
-                "error": f"Webhook processing error: {str(e)}",
+                "error": f"خطأ في معالجة الـ webhook: {str(e)}",
                 "error_code": "processing_error"
             }
     
-    def _verify_webhook_signature(self, payload: bytes, signature: str) -> bool:
-        """
-        Verify webhook signature to ensure it's from Moyasar.
-        """
-        if not self.webhook_secret:
-            return True  # Skip verification if no secret is configured
-        
+    def _handle_invoice_paid(self, webhook_data: Dict[str, Any]) -> Dict[str, Any]:
         try:
-            # Create expected signature
-            expected_signature = hmac.new(
-                self.webhook_secret.encode('utf-8'),
-                payload,
-                hashlib.sha256
-            ).hexdigest()
+            invoice_data = webhook_data.get("data", {})
+            invoice_id = invoice_data.get("id")
             
-            # Compare signatures
-            return hmac.compare_digest(signature, expected_signature)
-        
-        except Exception:
-            return False
-    
-    def _handle_payment_paid(self, payment_data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Handle payment paid webhook event.
-        """
-        moyasar_payment_id = payment_data.get("id")
-        
-        # Find payment in database
-        payment = self.db.query(Payment).filter(
-            Payment.payment_id == moyasar_payment_id
-        ).first()
-        
-        if not payment:
-            return {
-                "success": False,
-                "error": "Payment not found in database",
-                "error_code": "payment_not_found"
-            }
-        
-        # Update payment status
-        payment.payment_status = PaymentStatus.PAID
-        payment.confirmed_at = datetime.utcnow()
-        payment.gateway_response = payment_data
-        
-        # Update transaction ID if provided
-        if payment_data.get("source", {}).get("transaction_id"):
-            payment.transaction_id = payment_data["source"]["transaction_id"]
-        
-        self.db.commit()
-        
-        return {
-            "success": True,
-            "message": "Payment marked as paid",
-            "payment_id": payment.id,
-            "moyasar_payment_id": moyasar_payment_id
-        }
-    
-    def _handle_payment_failed(self, payment_data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Handle payment failed webhook event.
-        """
-        moyasar_payment_id = payment_data.get("id")
-        
-        # Find payment in database
-        payment = self.db.query(Payment).filter(
-            Payment.payment_id == moyasar_payment_id
-        ).first()
-        
-        if not payment:
-            return {
-                "success": False,
-                "error": "Payment not found in database",
-                "error_code": "payment_not_found"
-            }
-        
-        # Update payment status
-        payment.payment_status = PaymentStatus.FAILED
-        payment.gateway_response = payment_data
-        
-        # Add failure reason if available
-        if payment_data.get("source", {}).get("message"):
-            payment.notes = payment_data["source"]["message"]
-        
-        self.db.commit()
-        
-        return {
-            "success": True,
-            "message": "Payment marked as failed",
-            "payment_id": payment.id,
-            "moyasar_payment_id": moyasar_payment_id
-        }
-    
-    def _handle_payment_refunded(self, payment_data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Handle payment refunded webhook event.
-        """
-        moyasar_payment_id = payment_data.get("id")
-        
-        # Find payment in database
-        payment = self.db.query(Payment).filter(
-            Payment.payment_id == moyasar_payment_id
-        ).first()
-        
-        if not payment:
-            return {
-                "success": False,
-                "error": "Payment not found in database",
-                "error_code": "payment_not_found"
-            }
-        
-        # Update payment status
-        payment.payment_status = PaymentStatus.REFUNDED
-        payment.refunded_at = datetime.utcnow()
-        payment.gateway_response = payment_data
-        
-        # Update refunded amount
-        if payment_data.get("amount"):
-            payment.refunded_amount = Decimal(payment_data["amount"]) / 100
-        
-        self.db.commit()
-        
-        return {
-            "success": True,
-            "message": "Payment marked as refunded",
-            "payment_id": payment.id,
-            "moyasar_payment_id": moyasar_payment_id
-        }
-    
-    def _log_gateway_interaction(
-        self,
-        payment_id: Optional[str],
-        request_data: Dict[str, Any],
-        response_data: Dict[str, Any],
-        status: str,
-        response_code: str
-    ):
-        """
-        Log gateway interaction for debugging and audit purposes.
-        """
-        # Find payment record if payment_id exists
-        payment_record = None
-        if payment_id:
-            payment_record = self.db.query(Payment).filter(
-                Payment.payment_id == payment_id
+            if not invoice_id:
+                return {
+                    "success": False,
+                    "error": "Invoice ID missing from webhook data",
+                    "error_code": "missing_invoice_id"
+                }
+            
+            payment = self.db.query(Payment).filter(
+                Payment.transaction_id == invoice_id
             ).first()
-        
-        log_entry = PaymentGatewayLog(
-            payment_id=payment_record.id if payment_record else None,
-            gateway="moyasar",
-            gateway_transaction_id=payment_id,
-            request_data=request_data,
-            response_data=response_data,
-            status=status,
-            response_code=response_code,
-            response_message=response_data.get("message", "")
-        )
-        
-        self.db.add(log_entry)
-        self.db.commit()
-    
-    def get_payment_methods(self) -> List[Dict[str, Any]]:
-        """
-        Get available payment methods for Moyasar.
-        """
-        return [
-            {
-                "id": "creditcard",
-                "name": "Credit Card",
-                "type": "card",
-                "supported_cards": ["visa", "mastercard", "amex"],
-                "currency": "SAR",
-                "min_amount": 1.00,
-                "max_amount": 10000.00,
-                "fees": {
-                    "percentage": 2.9,
-                    "fixed": 0.00
+            
+            if not payment:
+                return {
+                    "success": False,
+                    "error": f"Payment not found for invoice {invoice_id}",
+                    "error_code": "payment_not_found"
                 }
-            },
-            {
-                "id": "stcpay",
-                "name": "STC Pay",
-                "type": "wallet",
-                "currency": "SAR",
-                "min_amount": 1.00,
-                "max_amount": 5000.00,
-                "fees": {
-                    "percentage": 2.0,
-                    "fixed": 0.00
-                }
-            },
-            {
-                "id": "applepay",
-                "name": "Apple Pay",
-                "type": "wallet",
-                "currency": "SAR",
-                "min_amount": 1.00,
-                "max_amount": 10000.00,
-                "fees": {
-                    "percentage": 2.9,
-                    "fixed": 0.00
-                }
+            
+            payment.payment_status = PaymentStatus.PAID
+            payment.confirmed_at = datetime.utcnow()
+            payment.gateway_response = json.dumps(webhook_data)
+            
+            if payment.invoice:
+                payment.invoice.status = PaymentStatus.PAID
+                payment.invoice.paid_at = datetime.utcnow()
+            
+            self.db.commit()
+            
+            return {
+                "success": True,
+                "message": "Payment confirmed successfully",
+                "payment_id": payment.id,
+                "invoice_id": payment.invoice_id
             }
-        ] 
+            
+        except Exception as e:
+            self.db.rollback()
+            return {
+                "success": False,
+                "error": f"خطأ في معالجة دفع ناجح: {str(e)}",
+                "error_code": "processing_error"
+            }
+    
+    def _handle_invoice_failed(self, webhook_data: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            invoice_data = webhook_data.get("data", {})
+            invoice_id = invoice_data.get("id")
+            
+            if not invoice_id:
+                return {
+                    "success": False,
+                    "error": "Invoice ID missing from webhook data",
+                    "error_code": "missing_invoice_id"
+                }
+            
+            payment = self.db.query(Payment).filter(
+                Payment.transaction_id == invoice_id
+            ).first()
+            
+            if not payment:
+                return {
+                    "success": False,
+                    "error": f"Payment not found for invoice {invoice_id}",
+                    "error_code": "payment_not_found"
+                }
+            
+            payment.payment_status = PaymentStatus.FAILED
+            payment.gateway_response = json.dumps(webhook_data)
+            
+            if payment.invoice:
+                payment.invoice.status = PaymentStatus.FAILED
+            
+            self.db.commit()
+            
+            return {
+                "success": True,
+                "message": "Payment failure processed successfully",
+                "payment_id": payment.id,
+                "invoice_id": payment.invoice_id
+            }
+            
+        except Exception as e:
+            self.db.rollback()
+            return {
+                "success": False,
+                "error": f"خطأ في معالجة فشل الدفع: {str(e)}",
+                "error_code": "processing_error"
+            }
+    
+    def get_payment_methods(self) -> Dict[str, Any]:
+        return {
+            "methods": [
+                {
+                    "id": "creditcard",
+                    "name": "بطاقة ائتمان",
+                    "type": "creditcard",
+                    "logo": "https://cdn.moyasar.com/assets/creditcard.svg",
+                    "supported_brands": ["visa", "mastercard", "mada"]
+                },
+                {
+                    "id": "applepay",
+                    "name": "Apple Pay",
+                    "type": "applepay",
+                    "logo": "https://cdn.moyasar.com/assets/applepay.svg",
+                    "supported_devices": ["iphone", "ipad", "mac"]
+                },
+                {
+                    "id": "stcpay",
+                    "name": "STC Pay",
+                    "type": "stcpay",
+                    "logo": "https://cdn.moyasar.com/assets/stcpay.svg",
+                    "supported_countries": ["SA"]
+                }
+            ],
+            "currency": "SAR",
+            "supported_currencies": ["SAR"]
+        } 

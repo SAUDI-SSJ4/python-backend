@@ -356,6 +356,7 @@ async def verify_otp(
         log_auth_attempt(request, "verify_otp", False, {"phone": phone, "error": "verification_failed"})
         raise
     except Exception as e:
+        db.rollback()
         logger.error(f"OTP verification failed: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -685,6 +686,7 @@ async def upload_academy_logo(
     except HTTPException:
         raise
     except Exception as e:
+        db.rollback()
         logger.error(f"Academy logo upload failed: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -735,6 +737,7 @@ async def upload_academy_cover(
     except HTTPException:
         raise
     except Exception as e:
+        db.rollback()
         logger.error(f"Academy cover upload failed: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -778,6 +781,7 @@ async def upload_profile_image(
     except HTTPException:
         raise
     except Exception as e:
+        db.rollback()
         logger.error(f"Profile image upload failed: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

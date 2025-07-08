@@ -1,5 +1,6 @@
 from typing import Any, List, Optional
-from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form, Query
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from datetime import datetime
 
@@ -23,6 +24,7 @@ from app.schemas.lesson import (
 )
 from app.services.file_service import FileService
 from app.services.video_streaming import VideoStreamingService
+from app.core.response_handler import SayanSuccessResponse
 
 router = APIRouter()
 file_service = FileService()
@@ -118,35 +120,44 @@ async def update_lesson(
     """
     تحديث الدرس
     """
-    lesson = db.query(Lesson).filter(Lesson.id == lesson_id).first()
-    
-    if not lesson:
+    try:
+        lesson = db.query(Lesson).filter(Lesson.id == lesson_id).first()
+        
+        if not lesson:
+            raise HTTPException(
+                status_code=404,
+                detail={"status": "error", "error": "الدرس غير موجود"}
+            )
+        
+        # التحقق من الصلاحية
+        course = db.query(Course).filter(
+            Course.id == lesson.course_id,
+            Course.academy_id == current_user.id
+        ).first()
+        
+        if not course:
+            raise HTTPException(
+                status_code=403,
+                detail={"status": "error", "error": "ليس لديك صلاحية لتعديل هذا الدرس"}
+            )
+        
+        # تحديث البيانات
+        update_data = lesson_data.dict(exclude_unset=True)
+        for field, value in update_data.items():
+            setattr(lesson, field, value)
+        
+        db.commit()
+        db.refresh(lesson)
+        
+        return lesson
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
         raise HTTPException(
-            status_code=404,
-            detail={"status": "error", "error": "الدرس غير موجود"}
+            status_code=500,
+            detail={"status": "error", "error": f"حدث خطأ أثناء تحديث الدرس: {str(e)}"}
         )
-    
-    # التحقق من الصلاحية
-    course = db.query(Course).filter(
-        Course.id == lesson.course_id,
-        Course.academy_id == current_user.id
-    ).first()
-    
-    if not course:
-        raise HTTPException(
-            status_code=403,
-            detail={"status": "error", "error": "ليس لديك صلاحية لتعديل هذا الدرس"}
-        )
-    
-    # تحديث البيانات
-    update_data = lesson_data.dict(exclude_unset=True)
-    for field, value in update_data.items():
-        setattr(lesson, field, value)
-    
-    db.commit()
-    db.refresh(lesson)
-    
-    return lesson
 
 @router.delete("/{lesson_id}")
 async def delete_lesson(
@@ -154,33 +165,42 @@ async def delete_lesson(
     db: Session = Depends(get_db),
     current_user = Depends(get_current_academy_user)
 ) -> Any:
-    """
-    حذف الدرس
-    """
-    lesson = db.query(Lesson).filter(Lesson.id == lesson_id).first()
+    """Delete lesson"""
     
-    if not lesson:
-        raise HTTPException(
-            status_code=404,
-            detail={"status": "error", "error": "الدرس غير موجود"}
+    try:
+        lesson = db.query(Lesson).filter(Lesson.id == lesson_id).first()
+        
+        if not lesson:
+            raise HTTPException(
+                status_code=404,
+                detail={"status": "error", "error": "الدرس غير موجود"}
+            )
+        
+        course = db.query(Course).filter(
+            Course.id == lesson.course_id,
+            Course.academy_id == current_user.id
+        ).first()
+        
+        if not course:
+            raise HTTPException(
+                status_code=403,
+                detail={"status": "error", "error": "ليس لديك صلاحية لحذف هذا الدرس"}
+            )
+        
+        db.delete(lesson)
+        db.commit()
+        
+        return SayanSuccessResponse(
+            message="تم حذف الدرس بنجاح"
         )
-    
-    # التحقق من الصلاحية
-    course = db.query(Course).filter(
-        Course.id == lesson.course_id,
-        Course.academy_id == current_user.id
-    ).first()
-    
-    if not course:
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
         raise HTTPException(
-            status_code=403,
-            detail={"status": "error", "error": "ليس لديك صلاحية لحذف هذا الدرس"}
+            status_code=500,
+            detail={"status": "error", "error": f"حدث خطأ أثناء حذف الدرس: {str(e)}"}
         )
-    
-    db.delete(lesson)
-    db.commit()
-    
-    return {"status": "success", "message": "تم حذف الدرس بنجاح"}
 
 @router.post("/{lesson_id}/video")
 async def upload_lesson_video(
@@ -194,62 +214,72 @@ async def upload_lesson_video(
     """
     رفع فيديو للدرس
     """
-    lesson = db.query(Lesson).filter(Lesson.id == lesson_id).first()
-    
-    if not lesson:
-        raise HTTPException(
-            status_code=404,
-            detail={"status": "error", "error": "الدرس غير موجود"}
+    try:
+        lesson = db.query(Lesson).filter(Lesson.id == lesson_id).first()
+        
+        if not lesson:
+            raise HTTPException(
+                status_code=404,
+                detail={"status": "error", "error": "الدرس غير موجود"}
+            )
+        
+        # التحقق من الصلاحية
+        course = db.query(Course).filter(
+            Course.id == lesson.course_id,
+            Course.academy_id == current_user.id
+        ).first()
+        
+        if not course:
+            raise HTTPException(
+                status_code=403,
+                detail={"status": "error", "error": "ليس لديك صلاحية لرفع فيديو لهذا الدرس"}
+            )
+        
+        # رفع الفيديو
+        video_path = await file_service.save_any_file(video_file, subfolder="lessons")
+        
+        # إنشاء سجل الفيديو
+        video = Video(
+            lesson_id=lesson_id,
+            title=title,
+            description=description,
+            video_path=video_path,
+            file_size=video_file.size or 0,
+            format=video_file.content_type or "video/mp4"
         )
-    
-    # التحقق من الصلاحية
-    course = db.query(Course).filter(
-        Course.id == lesson.course_id,
-        Course.academy_id == current_user.id
-    ).first()
-    
-    if not course:
-        raise HTTPException(
-            status_code=403,
-            detail={"status": "error", "error": "ليس لديك صلاحية لرفع فيديو لهذا الدرس"}
+        
+        db.add(video)
+        
+        # تحديث الدرس ليصبح نوعه فيديو
+        lesson.type = "video"
+        lesson.video = video_path
+        lesson.size_bytes = video_file.size or 0
+        
+        db.commit()
+        db.refresh(video)
+        
+        return SayanSuccessResponse(
+            data={
+                "video": {
+                    "id": video.id,
+                    "title": video.title,
+                    "description": video.description,
+                    "video_path": video.video_path,
+                    "file_size": video.file_size,
+                    "format": video.format,
+                    "created_at": video.created_at.isoformat()
+                }
+            },
+            message="تم رفع الفيديو بنجاح"
         )
-    
-    # رفع الفيديو
-    video_path = await file_service.save_any_file(video_file, subfolder="lessons")
-    
-    # إنشاء سجل الفيديو
-    video = Video(
-        lesson_id=lesson_id,
-        title=title,
-        description=description,
-        video_path=video_path,
-        file_size=video_file.size or 0,
-        format=video_file.content_type or "video/mp4"
-    )
-    
-    db.add(video)
-    
-    # تحديث الدرس ليصبح نوعه فيديو
-    lesson.type = "video"
-    lesson.video = video_path
-    lesson.size_bytes = video_file.size or 0
-    
-    db.commit()
-    db.refresh(video)
-    
-    return {
-        "status": "success",
-        "message": "تم رفع الفيديو بنجاح",
-        "video": {
-            "id": video.id,
-            "title": video.title,
-            "description": video.description,
-            "video_path": video.video_path,
-            "file_size": video.file_size,
-            "format": video.format,
-            "created_at": video.created_at.isoformat()
-        }
-    }
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail={"status": "error", "error": f"حدث خطأ أثناء رفع الفيديو: {str(e)}"}
+        )
 
 @router.post("/{lesson_id}/exam")
 async def create_lesson_exam(
@@ -261,58 +291,68 @@ async def create_lesson_exam(
     """
     إنشاء امتحان للدرس
     """
-    lesson = db.query(Lesson).filter(Lesson.id == lesson_id).first()
-    
-    if not lesson:
-        raise HTTPException(
-            status_code=404,
-            detail={"status": "error", "error": "الدرس غير موجود"}
+    try:
+        lesson = db.query(Lesson).filter(Lesson.id == lesson_id).first()
+        
+        if not lesson:
+            raise HTTPException(
+                status_code=404,
+                detail={"status": "error", "error": "الدرس غير موجود"}
+            )
+        
+        # التحقق من الصلاحية
+        course = db.query(Course).filter(
+            Course.id == lesson.course_id,
+            Course.academy_id == current_user.id
+        ).first()
+        
+        if not course:
+            raise HTTPException(
+                status_code=403,
+                detail={"status": "error", "error": "ليس لديك صلاحية لإنشاء امتحان لهذا الدرس"}
+            )
+        
+        # إنشاء الامتحان
+        exam = Exam(
+            lesson_id=lesson_id,
+            title=exam_data.get("title"),
+            description=exam_data.get("description"),
+            duration_minutes=exam_data.get("duration_minutes", 30),
+            pass_score=exam_data.get("pass_score", 70),
+            max_attempts=exam_data.get("max_attempts", 3),
+            is_active=True
         )
-    
-    # التحقق من الصلاحية
-    course = db.query(Course).filter(
-        Course.id == lesson.course_id,
-        Course.academy_id == current_user.id
-    ).first()
-    
-    if not course:
-        raise HTTPException(
-            status_code=403,
-            detail={"status": "error", "error": "ليس لديك صلاحية لإنشاء امتحان لهذا الدرس"}
+        
+        db.add(exam)
+        
+        # تحديث نوع الدرس ليصبح امتحان
+        lesson.type = "exam"
+        
+        db.commit()
+        db.refresh(exam)
+        
+        return SayanSuccessResponse(
+            data={
+                "exam": {
+                    "id": exam.id,
+                    "title": exam.title,
+                    "description": exam.description,
+                    "duration_minutes": exam.duration_minutes,
+                    "pass_score": exam.pass_score,
+                    "max_attempts": exam.max_attempts,
+                    "created_at": exam.created_at.isoformat()
+                }
+            },
+            message="تم إنشاء الامتحان بنجاح"
         )
-    
-    # إنشاء الامتحان
-    exam = Exam(
-        lesson_id=lesson_id,
-        title=exam_data.get("title"),
-        description=exam_data.get("description"),
-        duration_minutes=exam_data.get("duration_minutes", 30),
-        pass_score=exam_data.get("pass_score", 70),
-        max_attempts=exam_data.get("max_attempts", 3),
-        is_active=True
-    )
-    
-    db.add(exam)
-    
-    # تحديث نوع الدرس ليصبح امتحان
-    lesson.type = "exam"
-    
-    db.commit()
-    db.refresh(exam)
-    
-    return {
-        "status": "success",
-        "message": "تم إنشاء الامتحان بنجاح",
-        "exam": {
-            "id": exam.id,
-            "title": exam.title,
-            "description": exam.description,
-            "duration_minutes": exam.duration_minutes,
-            "pass_score": exam.pass_score,
-            "max_attempts": exam.max_attempts,
-            "created_at": exam.created_at.isoformat()
-        }
-    }
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail={"status": "error", "error": f"حدث خطأ أثناء إنشاء الامتحان: {str(e)}"}
+        )
 
 @router.post("/{lesson_id}/tools")
 async def add_interactive_tool(
@@ -324,59 +364,69 @@ async def add_interactive_tool(
     """
     إضافة أداة تفاعلية للدرس
     """
-    lesson = db.query(Lesson).filter(Lesson.id == lesson_id).first()
-    
-    if not lesson:
-        raise HTTPException(
-            status_code=404,
-            detail={"status": "error", "error": "الدرس غير موجود"}
+    try:
+        lesson = db.query(Lesson).filter(Lesson.id == lesson_id).first()
+        
+        if not lesson:
+            raise HTTPException(
+                status_code=404,
+                detail={"status": "error", "error": "الدرس غير موجود"}
+            )
+        
+        # التحقق من الصلاحية
+        course = db.query(Course).filter(
+            Course.id == lesson.course_id,
+            Course.academy_id == current_user.id
+        ).first()
+        
+        if not course:
+            raise HTTPException(
+                status_code=403,
+                detail={"status": "error", "error": "ليس لديك صلاحية لإضافة أداة لهذا الدرس"}
+            )
+        
+        # إنشاء الأداة التفاعلية
+        tool = InteractiveTool(
+            lesson_id=lesson_id,
+            title=tool_data.get("title"),
+            description=tool_data.get("description"),
+            tool_type=tool_data.get("tool_type"),
+            url=tool_data.get("url"),
+            content=tool_data.get("content"),
+            settings=tool_data.get("settings"),
+            order_number=tool_data.get("order_number", 1)
         )
-    
-    # التحقق من الصلاحية
-    course = db.query(Course).filter(
-        Course.id == lesson.course_id,
-        Course.academy_id == current_user.id
-    ).first()
-    
-    if not course:
-        raise HTTPException(
-            status_code=403,
-            detail={"status": "error", "error": "ليس لديك صلاحية لإضافة أداة لهذا الدرس"}
+        
+        db.add(tool)
+        
+        # تحديث نوع الدرس ليصبح أداة تفاعلية
+        lesson.type = "tool"
+        
+        db.commit()
+        db.refresh(tool)
+        
+        return SayanSuccessResponse(
+            data={
+                "tool": {
+                    "id": tool.id,
+                    "title": tool.title,
+                    "description": tool.description,
+                    "tool_type": tool.tool_type,
+                    "url": tool.url,
+                    "order_number": tool.order_number,
+                    "created_at": tool.created_at.isoformat()
+                }
+            },
+            message="تم إضافة الأداة التفاعلية بنجاح"
         )
-    
-    # إنشاء الأداة التفاعلية
-    tool = InteractiveTool(
-        lesson_id=lesson_id,
-        title=tool_data.get("title"),
-        description=tool_data.get("description"),
-        tool_type=tool_data.get("tool_type"),
-        url=tool_data.get("url"),
-        content=tool_data.get("content"),
-        settings=tool_data.get("settings"),
-        order_number=tool_data.get("order_number", 1)
-    )
-    
-    db.add(tool)
-    
-    # تحديث نوع الدرس ليصبح أداة تفاعلية
-    lesson.type = "tool"
-    
-    db.commit()
-    db.refresh(tool)
-    
-    return {
-        "status": "success",
-        "message": "تم إضافة الأداة التفاعلية بنجاح",
-        "tool": {
-            "id": tool.id,
-            "title": tool.title,
-            "description": tool.description,
-            "tool_type": tool.tool_type,
-            "url": tool.url,
-            "order_number": tool.order_number,
-            "created_at": tool.created_at.isoformat()
-        }
-    }
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail={"status": "error", "error": f"حدث خطأ أثناء إضافة الأداة التفاعلية: {str(e)}"}
+        )
 
 # Student Progress Endpoints
 @router.get("/{lesson_id}/progress", response_model=LessonProgressResponse)
@@ -388,34 +438,43 @@ async def get_lesson_progress(
     """
     الحصول على تقدم الطالب في الدرس
     """
-    progress = db.query(LessonProgress).filter(
-        LessonProgress.lesson_id == lesson_id,
-        LessonProgress.student_id == current_student.id
-    ).first()
-    
-    if not progress:
-        # إنشاء تقدم افتراضي إذا لم يوجد
-        lesson = db.query(Lesson).filter(Lesson.id == lesson_id).first()
-        if not lesson:
-            raise HTTPException(
-                status_code=404,
-                detail={"status": "error", "error": "الدرس غير موجود"}
+    try:
+        progress = db.query(LessonProgress).filter(
+            LessonProgress.lesson_id == lesson_id,
+            LessonProgress.student_id == current_student.id
+        ).first()
+        
+        if not progress:
+            # إنشاء تقدم افتراضي إذا لم يوجد
+            lesson = db.query(Lesson).filter(Lesson.id == lesson_id).first()
+            if not lesson:
+                raise HTTPException(
+                    status_code=404,
+                    detail={"status": "error", "error": "الدرس غير موجود"}
+                )
+            
+            progress = LessonProgress(
+                student_id=current_student.id,
+                lesson_id=lesson_id,
+                course_id=lesson.course_id,
+                progress_percentage=0,
+                completed=False,
+                current_position_seconds=0
             )
+            
+            db.add(progress)
+            db.commit()
+            db.refresh(progress)
         
-        progress = LessonProgress(
-            student_id=current_student.id,
-            lesson_id=lesson_id,
-            course_id=lesson.course_id,
-            progress_percentage=0,
-            completed=False,
-            current_position_seconds=0
+        return progress
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail={"status": "error", "error": f"حدث خطأ أثناء جلب تقدم الدرس: {str(e)}"}
         )
-        
-        db.add(progress)
-        db.commit()
-        db.refresh(progress)
-    
-    return progress
 
 @router.put("/{lesson_id}/progress", response_model=LessonProgressResponse)
 async def update_lesson_progress(
@@ -427,43 +486,52 @@ async def update_lesson_progress(
     """
     تحديث تقدم الطالب في الدرس
     """
-    progress = db.query(LessonProgress).filter(
-        LessonProgress.lesson_id == lesson_id,
-        LessonProgress.student_id == current_student.id
-    ).first()
-    
-    if not progress:
-        # إنشاء سجل تقدم جديد
-        lesson = db.query(Lesson).filter(Lesson.id == lesson_id).first()
-        if not lesson:
-            raise HTTPException(
-                status_code=404,
-                detail={"status": "error", "error": "الدرس غير موجود"}
+    try:
+        progress = db.query(LessonProgress).filter(
+            LessonProgress.lesson_id == lesson_id,
+            LessonProgress.student_id == current_student.id
+        ).first()
+        
+        if not progress:
+            # إنشاء سجل تقدم جديد
+            lesson = db.query(Lesson).filter(Lesson.id == lesson_id).first()
+            if not lesson:
+                raise HTTPException(
+                    status_code=404,
+                    detail={"status": "error", "error": "الدرس غير موجود"}
+                )
+            
+            progress = LessonProgress(
+                student_id=current_student.id,
+                lesson_id=lesson_id,
+                course_id=lesson.course_id,
+                progress_percentage=progress_data.progress_percentage,
+                completed=progress_data.completed or False,
+                current_position_seconds=progress_data.current_position_seconds or 0
             )
+            
+            db.add(progress)
+        else:
+            # تحديث التقدم الموجود
+            progress.progress_percentage = progress_data.progress_percentage
+            if progress_data.completed is not None:
+                progress.completed = progress_data.completed
+            if progress_data.current_position_seconds is not None:
+                progress.current_position_seconds = progress_data.current_position_seconds
+            progress.last_watched_at = datetime.now()
         
-        progress = LessonProgress(
-            student_id=current_student.id,
-            lesson_id=lesson_id,
-            course_id=lesson.course_id,
-            progress_percentage=progress_data.progress_percentage,
-            completed=progress_data.completed or False,
-            current_position_seconds=progress_data.current_position_seconds or 0
+        db.commit()
+        db.refresh(progress)
+        
+        return progress
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail={"status": "error", "error": f"حدث خطأ أثناء تحديث تقدم الدرس: {str(e)}"}
         )
-        
-        db.add(progress)
-    else:
-        # تحديث التقدم الموجود
-        progress.progress_percentage = progress_data.progress_percentage
-        if progress_data.completed is not None:
-            progress.completed = progress_data.completed
-        if progress_data.current_position_seconds is not None:
-            progress.current_position_seconds = progress_data.current_position_seconds
-        progress.last_watched_at = datetime.now()
-    
-    db.commit()
-    db.refresh(progress)
-    
-    return progress
 
 @router.get("/{lesson_id}/videos")
 async def get_lesson_videos(
@@ -471,9 +539,7 @@ async def get_lesson_videos(
     db: Session = Depends(get_db),
     current_student: Student = Depends(get_current_student)
 ) -> Any:
-    """
-    الحصول على فيديوهات الدرس
-    """
+    """Get lesson videos"""
     lesson = db.query(Lesson).filter(Lesson.id == lesson_id).first()
     
     if not lesson:
@@ -484,22 +550,24 @@ async def get_lesson_videos(
     
     videos = db.query(Video).filter(Video.lesson_id == lesson_id).all()
     
-    return {
-        "status": "success",
-        "videos": [
-            {
-                "id": video.id,
-                "title": video.title,
-                "description": video.description,
-                "duration": video.duration,
-                "format": video.format,
-                "resolution": video.resolution,
-                "file_size": video.file_size,
-                "created_at": video.created_at.isoformat()
-            }
-            for video in videos
-        ]
-    }
+    return SayanSuccessResponse(
+        data={
+            "videos": [
+                {
+                    "id": video.id,
+                    "title": video.title,
+                    "description": video.description,
+                    "duration": video.duration,
+                    "format": video.format,
+                    "resolution": video.resolution,
+                    "file_size": video.file_size,
+                    "created_at": video.created_at.isoformat()
+                }
+                for video in videos
+            ]
+        },
+        message="تم جلب فيديوهات الدرس بنجاح"
+    )
 
 @router.get("/{lesson_id}/exams")
 async def get_lesson_exams(
@@ -507,9 +575,7 @@ async def get_lesson_exams(
     db: Session = Depends(get_db),
     current_student: Student = Depends(get_current_student)
 ) -> Any:
-    """
-    الحصول على امتحانات الدرس
-    """
+    """Get lesson exams"""
     lesson = db.query(Lesson).filter(Lesson.id == lesson_id).first()
     
     if not lesson:
@@ -520,22 +586,24 @@ async def get_lesson_exams(
     
     exams = db.query(Exam).filter(Exam.lesson_id == lesson_id).all()
     
-    return {
-        "status": "success",
-        "exams": [
-            {
-                "id": exam.id,
-                "title": exam.title,
-                "description": exam.description,
-                "duration_minutes": exam.duration_minutes,
-                "pass_score": exam.pass_score,
-                "max_attempts": exam.max_attempts,
-                "is_active": exam.is_active,
-                "created_at": exam.created_at.isoformat()
-            }
-            for exam in exams
-        ]
-    }
+    return SayanSuccessResponse(
+        data={
+            "exams": [
+                {
+                    "id": exam.id,
+                    "title": exam.title,
+                    "description": exam.description,
+                    "duration_minutes": exam.duration_minutes,
+                    "pass_score": exam.pass_score,
+                    "max_attempts": exam.max_attempts,
+                    "is_active": exam.is_active,
+                    "created_at": exam.created_at.isoformat()
+                }
+                for exam in exams
+            ]
+        },
+        message="تم جلب امتحانات الدرس بنجاح"
+    )
 
 @router.get("/{lesson_id}/tools")
 async def get_lesson_tools(
@@ -543,9 +611,7 @@ async def get_lesson_tools(
     db: Session = Depends(get_db),
     current_student: Student = Depends(get_current_student)
 ) -> Any:
-    """
-    الحصول على الأدوات التفاعلية للدرس
-    """
+    """Get lesson interactive tools"""
     lesson = db.query(Lesson).filter(Lesson.id == lesson_id).first()
     
     if not lesson:
@@ -558,20 +624,22 @@ async def get_lesson_tools(
         InteractiveTool.lesson_id == lesson_id
     ).order_by(InteractiveTool.order_number).all()
     
-    return {
-        "status": "success",
-        "tools": [
-            {
-                "id": tool.id,
-                "title": tool.title,
-                "description": tool.description,
-                "tool_type": tool.tool_type,
-                "url": tool.url,
-                "content": tool.content,
-                "settings": tool.settings,
-                "order_number": tool.order_number,
-                "created_at": tool.created_at.isoformat()
-            }
-            for tool in tools
-        ]
-    }
+    return SayanSuccessResponse(
+        data={
+            "tools": [
+                {
+                    "id": tool.id,
+                    "title": tool.title,
+                    "description": tool.description,
+                    "tool_type": tool.tool_type,
+                    "url": tool.url,
+                    "content": tool.content,
+                    "settings": tool.settings,
+                    "order_number": tool.order_number,
+                    "created_at": tool.created_at.isoformat()
+                }
+                for tool in tools
+            ]
+        },
+        message="تم جلب أدوات الدرس التفاعلية بنجاح"
+    )

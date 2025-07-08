@@ -1,8 +1,5 @@
 """
 FastAPI Main Application
-========================
-Main entry point for the Unified Authentication System API.
-Includes CORS middleware, static file serving, and authentication routes.
 """
 
 from fastapi import FastAPI, Request, HTTPException
@@ -15,21 +12,18 @@ from fastapi.encoders import jsonable_encoder
 from sqlalchemy import create_engine, text
 from app.db.session import engine
 
-# Import all models to ensure they are registered with SQLAlchemy's Base.metadata
 from app.models import (
     User, UserType, UserStatus, AccountType, Student, Gender, Academy, AcademyUser, AcademyStatus, AcademyUserRole,
     OTP, OTPPurpose, AcademyFinance, StudentFinance, Transaction, Admin, Coupon, Course, CourseStatus, CourseType,
     CourseLevel, Category, Product, DigitalProduct, Package, StudentProduct, ProductStatus, ProductType, PackageType,
     Chapter, Lesson, LessonType, VideoType, Video, Cart, Invoice, InvoiceProduct, Payment, PaymentGatewayLog,
     CouponUsage, PaymentStatus, PaymentGateway, Exam, Question, QuestionOption, QuestionType, InteractiveTool,
-    LessonProgress, StudentCourse, AIAnswer
+    LessonProgress, StudentCourse
 )
 
-# Import authentication router
 from app.api.v1.auth import router as main_auth_router
 print("Successfully loaded main authentication router")
 
-# Import me router for user profile - استيراد راوتر /me للملف الشخصي
 try:
     from app.api.v1.me import router as me_router
     me_available = True
@@ -39,7 +33,6 @@ except Exception as e:
     me_router = None
     print(f"Failed to load user profile router: {e}")
 
-# Import courses routers
 try:
     from app.api.v1.courses.main import router as courses_main_router
     courses_main_available = True
@@ -67,7 +60,6 @@ except Exception as e:
     public_courses_router = None
     print(f"Failed to load public courses router: {e}")
 
-# Import videos router
 try:
     from app.api.v1.videos import router as videos_router
     videos_available = True
@@ -77,7 +69,6 @@ except Exception as e:
     videos_router = None
     print(f"Failed to load videos router: {e}")
 
-# Import other existing routers
 try:
     from app.api.v1.students import router as students_router
     students_available = True
@@ -88,15 +79,6 @@ except Exception as e:
     print(f"Failed to load students router: {e}")
 
 try:
-    from app.api.v1.academy_simplified import router as academy_router
-    academy_available = True
-    print("Successfully loaded academy router")
-except Exception as e:
-    academy_available = False
-    academy_router = None
-    print(f"Failed to load academy router: {e}")
-
-try:
     from app.api.v1.lessons import router as lessons_router
     lessons_available = True
     print("Successfully loaded lessons router")
@@ -105,7 +87,6 @@ except Exception as e:
     lessons_router = None
     print(f"Failed to load lessons router: {e}")
 
-# Import cart and payment routers
 try:
     from app.api.v1.cart import router as cart_router
     cart_available = True
@@ -133,12 +114,64 @@ except Exception as e:
     categories_router = None
     print(f"Failed to load categories router: {e}")
 
-# Create static directories if they don't exist
+try:
+    from app.api.v1.courses import router as courses_router
+    courses_available = True
+    print("Successfully loaded courses router")
+except Exception as e:
+    courses_available = False
+    courses_router = None
+    print(f"Failed to load courses router: {e}")
+
+try:
+    from app.api.v1.blogs import router as blogs_router
+    blogs_available = True
+    print("Successfully loaded blogs router")
+except Exception as e:
+    blogs_available = False
+    blogs_router = None
+    print(f"Failed to load blogs router: {e}")
+
+try:
+    from app.api.v1.digital_products import router as digital_products_router
+    digital_products_available = True
+    print("Successfully loaded digital products router")
+except Exception as e:
+    digital_products_available = False
+    digital_products_router = None
+    print(f"Failed to load digital products router: {e}")
+
+try:
+    from app.api.v1.wallet import router as wallet_router
+    wallet_available = True
+    print("Successfully loaded wallet router")
+except Exception as e:
+    wallet_available = False
+    wallet_router = None
+    print(f"Failed to load wallet router: {e}")
+
+try:
+    from app.api.v1.exams import router as exams_router
+    exams_available = True
+    print("Successfully loaded exams router")
+except Exception as e:
+    exams_available = False
+    exams_router = None
+    print(f"Failed to load exams router: {e}")
+
+try:
+    from app.api.v1.interactive_tools import router as interactive_tools_router
+    interactive_tools_available = True
+    print("Successfully loaded interactive tools router")
+except Exception as e:
+    interactive_tools_available = False
+    interactive_tools_router = None
+    print(f"Failed to load interactive tools router: {e}")
+
 static_dir = Path("static")
 static_dir.mkdir(exist_ok=True)
 (static_dir / "uploads").mkdir(exist_ok=True)
 
-# Create FastAPI application instance
 app = FastAPI(
     title="نظام إدارة الكورسات الشامل - SAYAN API",
     openapi_url="/api/v1/openapi.json",
@@ -148,10 +181,8 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# Mount static files for serving uploaded content
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Configure CORS middleware for cross-origin requests
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["https://sayan.website", "https://sayan.pro", "http://localhost:3000", "https://fast.sayan-server.com"],
@@ -206,8 +237,6 @@ async def custom_http_exception_handler(request: Request, exc: HTTPException):
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    """          (HTTP 422)"""
-
     from datetime import datetime
 
     first_error = exc.errors()[0] if exc.errors() else {}
@@ -240,7 +269,6 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
     return JSONResponse(status_code=422, content=jsonable_encoder(error_response))
 
-# Include authentication router
 app.include_router(
     main_auth_router,
     prefix="/api/v1/auth",
@@ -248,7 +276,6 @@ app.include_router(
 )
 print("Main authentication router registered successfully")
 
-# Include user profile router - تضمين راوتر الملف الشخصي
 if me_available:
     app.include_router(
         me_router,
@@ -257,7 +284,6 @@ if me_available:
     )
     print("User profile router registered successfully")
 
-# Include courses routers
 if courses_main_available:
     app.include_router(
         courses_main_router,
@@ -282,7 +308,6 @@ if public_courses_available:
     )
     print("Public courses router registered successfully")
 
-# Include videos router
 if videos_available:
     app.include_router(
         videos_router,
@@ -291,7 +316,6 @@ if videos_available:
     )
     print("Videos router registered successfully")
 
-# Include other existing routers
 if students_available:
     app.include_router(
         students_router,
@@ -300,15 +324,6 @@ if students_available:
     )
     print("Students router registered successfully")
 
-if academy_available:
-    app.include_router(
-        academy_router,
-        prefix="/api/v1/academy",
-        tags=["Academy Management"]
-    )
-    print("Academy router registered successfully")
-
-# Include lessons router
 if lessons_available:
     app.include_router(
         lessons_router,
@@ -317,7 +332,6 @@ if lessons_available:
     )
     print("Lessons router registered successfully")
 
-# Include cart router
 if cart_available:
     app.include_router(
         cart_router,
@@ -326,7 +340,6 @@ if cart_available:
     )
     print("Cart router registered successfully")
 
-# Include payment router
 if payment_available:
     app.include_router(
         payment_router,
@@ -335,7 +348,6 @@ if payment_available:
     )
     print("Payment router registered successfully")
 
-# Include categories router
 if categories_available:
     app.include_router(
         categories_router,
@@ -344,17 +356,53 @@ if categories_available:
     )
     print("Categories router registered successfully")
 
-# Include debug router
-try:
-    from app.api.v1.debug import router as debug_router
+if courses_available:
     app.include_router(
-        debug_router,
-        prefix="/api/v1",
-        tags=["Debug"]
+        courses_router,
+        prefix="/api/v1/courses",
+        tags=["Courses"]
     )
-    print("Debug router registered successfully")
-except Exception as e:
-    print(f"Failed to load debug router: {e}")
+    print("Courses router registered successfully")
+
+if blogs_available:
+    app.include_router(
+        blogs_router,
+        prefix="/api/v1/blogs",
+        tags=["Blogs"]
+    )
+    print("Blogs router registered successfully")
+
+if digital_products_available:
+    app.include_router(
+        digital_products_router,
+        prefix="/api/v1/digital_products",
+        tags=["Digital Products"]
+    )
+    print("Digital products router registered successfully")
+
+if wallet_available:
+    app.include_router(
+        wallet_router,
+        prefix="/api/v1/wallet",
+        tags=["Wallet"]
+    )
+    print("Wallet router registered successfully")
+
+if exams_available:
+    app.include_router(
+        exams_router,
+        prefix="/api/v1/exams",
+        tags=["Exams"]
+    )
+    print("Exams router registered successfully")
+
+if interactive_tools_available:
+    app.include_router(
+        interactive_tools_router,
+        prefix="/api/v1/interactive_tools",
+        tags=["Interactive Tools"]
+    )
+    print("Interactive tools router registered successfully")
 
 @app.get("/", summary="Root Endpoint")
 def root():
@@ -374,7 +422,6 @@ def health_check():
             "/api/v1/videos/* - Video streaming endpoints",
             "/api/v1/public/courses/* - Public course browsing",
             "/api/v1/students/* - Student management",
-            "/api/v1/academy/* - Academy management",
             "/api/v1/cart/* - Shopping cart management",
             "/api/v1/checkout/* - Payment processing",
             "/api/v1/transaction/* - Payment verification"
@@ -387,7 +434,6 @@ def health_check():
             "chapter_management": "Available",
             "public_browsing": "Available",
             "student_management": "Available",
-            "academy_management": "Available",
             "shopping_cart": "Available",
             "payment_processing": "Available",
             "moyasar_integration": "Available",
@@ -400,14 +446,13 @@ def health_check():
         }
     }
 
-# التحقق من اتصال قاعدة البيانات فقط (الجداول موجودة مسبقاً)
 @app.on_event("startup")
 def on_startup():
     try:
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
-        print("✅ تم الاتصال بقاعدة البيانات fast_sayan بنجاح")
+        print("Database connection established successfully")
     except Exception as e:
         import traceback
-        print("❌ تعذّر الاتصال بقاعدة البيانات:", e)
+        print("Failed to connect to database:", e)
         print(traceback.format_exc())

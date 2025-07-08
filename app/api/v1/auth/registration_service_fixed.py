@@ -97,11 +97,10 @@ class RegistrationService:
                 db.commit()
                 db.refresh(new_user)
                 
-                print(f"✅ تم رفع Avatar بنجاح: {avatar_path}")
+                print(f"Avatar uploaded successfully: {avatar_path}")
                 
             except Exception as e:
-                print(f"❌ خطأ في رفع Avatar: {e}")
-                # لا نرفع خطأ هنا حتى لا نؤثر على التسجيل
+                print(f"Error uploading avatar: {e}")
         
         # Create profile
         RegistrationService.create_user_profile(new_user, register_data, db)
