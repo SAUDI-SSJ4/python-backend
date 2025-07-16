@@ -2,15 +2,17 @@
 Cart API endpoints
 """
 
-from typing import Any, Optional
+from typing import Optional, Any
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Response, Header
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 import uuid
+from datetime import datetime
 
 from app.deps.database import get_db
 from app.deps.auth import get_optional_current_user, get_current_student
 from app.models.student import Student
+from app.models.user import User
 from app.services.cart_service import CartService
 from app.core.response_handler import SayanSuccessResponse
 
@@ -18,18 +20,27 @@ from app.core.response_handler import SayanSuccessResponse
 router = APIRouter()
 
 
+def _get_user_identifier(current_user: Optional[User]) -> Optional[int]:
+    """Get student ID from current user"""
+    if not current_user:
+        return None
+    
+    if current_user.user_type == "student" and current_user.student_profile:
+        return current_user.student_profile.id
+    
+    return None
+
+
+def _get_or_create_cookie_id(the_cookie: Optional[str]) -> str:
+    """Get or create cookie ID"""
+    if the_cookie:
+        return the_cookie
+    return str(uuid.uuid4())
+
+
 class AddToCartRequest(BaseModel):
     item_type: str = Field(..., description="Type of item: course or digital_product")
     item_id: str = Field(..., description="ID of the item to add")
-    quantity: int = Field(1, ge=1, le=10, description="Quantity of items to add")
-
-
-class UpdateCartRequest(BaseModel):
-    quantity: int = Field(1, ge=1, le=10, description="New quantity")
-
-
-class ApplyCouponRequest(BaseModel):
-    code: str = Field(..., description="Coupon code to apply")
 
 
 @router.get("/")
@@ -37,35 +48,50 @@ def get_cart(
     request: Request,
     response: Response,
     db: Session = Depends(get_db),
-    current_user: Optional[Student] = Depends(get_optional_current_user),
+    current_user: Optional[User] = Depends(get_optional_current_user),
     the_cookie: Optional[str] = Header(None, alias="TheCookie")
 ) -> Any:
+    """Get cart contents with complete summary"""
     try:
-        cart_service = CartService(db)
+        cookie_id = _get_or_create_cookie_id(the_cookie)
+        student_id = _get_user_identifier(current_user)
         
-        cookie_id = cart_service.extract_cookie_id(the_cookie)
-        if not cookie_id:
-            cookie_id = cart_service.get_or_create_cookie_id()
-        
-        student_id = current_user.id if current_user else None
-        
-        cart_summary = cart_service.get_cart_summary(
+        # Get cart summary instead of just items
+        result = CartService.get_cart_summary(
+            db=db,
             student_id=student_id,
             cookie_id=cookie_id
         )
         
-        response.headers["Set-Cookie"] = f"cart_id={cookie_id}; Path=/; HttpOnly"
+        if not result.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={"message": result.get("message", "خطأ في جلب السلة")}
+            )
+        
+        # Set cookie
+        response.set_cookie(key="TheCookie", value=cookie_id, httponly=True)
+        
+        # Add cookie info to response
+        cart_data = result.get("data", {})
+        cart_data["cookie_info"] = {
+            "cookie_id": cookie_id,
+            "user_id": student_id,
+            "is_authenticated": current_user is not None
+        }
         
         return SayanSuccessResponse(
-            data={**cart_summary, "cookie_id": cookie_id},
-            message="سلتك" if cart_summary["items"] else "سلة فارغة",
+            data=cart_data,
+            message=result.get("message", "تم جلب السلة بنجاح"),
             request=request
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"message": f"خطأ في جلب السلة: {str(e)}", "error_type": "Internal Server Error"}
+            detail={"message": f"خطأ في جلب السلة: {str(e)}"}
         )
 
 
@@ -75,137 +101,92 @@ def add_to_cart(
     request: Request,
     response: Response,
     db: Session = Depends(get_db),
-    current_user: Optional[Student] = Depends(get_optional_current_user),
+    current_user: Optional[User] = Depends(get_optional_current_user),
     the_cookie: Optional[str] = Header(None, alias="TheCookie")
 ) -> Any:
+    """Add item to cart"""
     try:
-        cart_service = CartService(db)
+        cookie_id = _get_or_create_cookie_id(the_cookie)
+        student_id = _get_user_identifier(current_user)
         
-        cookie_id = cart_service.extract_cookie_id(the_cookie)
-        student_id = current_user.id if current_user else None
-        
-        result = cart_service.add_to_cart(
+        result = CartService.add_to_cart(
+            db=db,
             item_type=cart_data.item_type,
             item_id=cart_data.item_id,
             student_id=student_id,
-            cookie_id=cookie_id,
-            quantity=cart_data.quantity
-        )
-        
-        response.headers["Set-Cookie"] = f"cart_id={result['cookie_id']}; Path=/; HttpOnly"
-        
-        cart_summary = cart_service.get_cart_summary(
-            student_id=student_id,
-            cookie_id=result['cookie_id']
-        )
-        
-        return SayanSuccessResponse(
-            data={
-                "action": result["action"],
-                "cart": cart_summary,
-                "cookie_id": result['cookie_id']
-            },
-            message=result["message"],
-            request=request
-        )
-        
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"message": str(e), "error_type": "Bad Request"}
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"message": f"خطأ في إضافة العنصر: {str(e)}", "error_type": "Internal Server Error"}
-        )
-
-
-@router.put("/update/{cart_item_id}")
-def update_cart_item(
-    cart_item_id: int,
-    update_data: UpdateCartRequest,
-    request: Request,
-    db: Session = Depends(get_db),
-    current_user: Optional[Student] = Depends(get_optional_current_user),
-    the_cookie: Optional[str] = Header(None, alias="TheCookie")
-) -> Any:
-    try:
-        cart_service = CartService(db)
-        
-        cookie_id = cart_service.extract_cookie_id(the_cookie)
-        student_id = current_user.id if current_user else None
-        
-        result = cart_service.update_cart_item(
-            cart_item_id=cart_item_id,
-            quantity=update_data.quantity,
-            student_id=student_id,
             cookie_id=cookie_id
         )
         
-        cart_summary = cart_service.get_cart_summary(
-            student_id=student_id,
-            cookie_id=cookie_id
-        )
+        if not result.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"message": result.get("message", "خطأ في إضافة المنتج")}
+            )
+        
+        # Set cookie
+        response.set_cookie(key="TheCookie", value=cookie_id, httponly=True)
+        
+        # Add cookie info to response
+        cart_data = result.get("data", {})
+        cart_data["cookie_info"] = {
+            "cookie_id": cookie_id,
+            "user_id": student_id,
+            "is_authenticated": current_user is not None
+        }
         
         return SayanSuccessResponse(
-            data={"cart": cart_summary},
-            message=result["message"],
+            data=cart_data,
+            message=result.get("message", "تم إضافة المنتج بنجاح"),
             request=request
         )
         
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"message": str(e), "error_type": "Bad Request"}
-        )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"message": f"خطأ في تحديث العنصر: {str(e)}", "error_type": "Internal Server Error"}
+            detail={"message": f"خطأ في إضافة المنتج: {str(e)}"}
         )
 
 
-@router.delete("/delete/{cart_item_id}")
+@router.delete("/delete/{cart_id}")
 def remove_from_cart(
-    cart_item_id: int,
+    cart_id: str,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: Optional[Student] = Depends(get_optional_current_user),
+    current_user: Optional[User] = Depends(get_optional_current_user),
     the_cookie: Optional[str] = Header(None, alias="TheCookie")
 ) -> Any:
+    """Remove item from cart"""
     try:
-        cart_service = CartService(db)
+        cookie_id = _get_or_create_cookie_id(the_cookie)
+        student_id = _get_user_identifier(current_user)
         
-        cookie_id = cart_service.extract_cookie_id(the_cookie)
-        student_id = current_user.id if current_user else None
-        
-        result = cart_service.remove_from_cart(
-            cart_item_id=cart_item_id,
+        result = CartService.remove_from_cart(
+            db=db,
+            cart_id=cart_id,
             student_id=student_id,
             cookie_id=cookie_id
         )
         
-        cart_summary = cart_service.get_cart_summary(
-            student_id=student_id,
-            cookie_id=cookie_id
-        )
+        if not result.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"message": result.get("message", "خطأ في حذف المنتج")}
+            )
         
         return SayanSuccessResponse(
-            data={"cart": cart_summary},
-            message=result["message"],
+            data=result.get("data", {}),
+            message=result.get("message", "تم حذف المنتج بنجاح"),
             request=request
         )
         
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"message": str(e), "error_type": "Bad Request"}
-        )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"message": f"خطأ في حذف العنصر: {str(e)}", "error_type": "Internal Server Error"}
+            detail={"message": f"خطأ في حذف المنتج: {str(e)}"}
         )
 
 
@@ -213,106 +194,36 @@ def remove_from_cart(
 def clear_cart(
     request: Request,
     db: Session = Depends(get_db),
-    current_user: Optional[Student] = Depends(get_optional_current_user),
+    current_user: Optional[User] = Depends(get_optional_current_user),
     the_cookie: Optional[str] = Header(None, alias="TheCookie")
 ) -> Any:
+    """Clear all items from cart"""
     try:
-        cart_service = CartService(db)
+        cookie_id = _get_or_create_cookie_id(the_cookie)
+        student_id = _get_user_identifier(current_user)
         
-        cookie_id = cart_service.extract_cookie_id(the_cookie)
-        student_id = current_user.id if current_user else None
-        
-        result = cart_service.clear_cart(
+        result = CartService.clear_cart(
+            db=db,
             student_id=student_id,
             cookie_id=cookie_id
         )
         
+        if not result.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"message": result.get("message", "خطأ في مسح السلة")}
+            )
+        
         return SayanSuccessResponse(
-            data={"items_cleared": result["items_cleared"]},
-            message=result["message"],
+            data=result.get("data", {}),
+            message=result.get("message", "تم مسح السلة بنجاح"),
             request=request
         )
         
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"message": f"خطأ في مسح السلة: {str(e)}", "error_type": "Internal Server Error"}
-        )
-
-
-@router.post("/apply-coupon")
-def apply_coupon(
-    coupon_data: ApplyCouponRequest,
-    request: Request,
-    db: Session = Depends(get_db),
-    current_user: Optional[Student] = Depends(get_optional_current_user),
-    the_cookie: Optional[str] = Header(None, alias="TheCookie")
-) -> Any:
-    try:
-        cart_service = CartService(db)
-        
-        cookie_id = cart_service.extract_cookie_id(the_cookie)
-        student_id = current_user.id if current_user else None
-        
-        cart_summary = cart_service.get_cart_summary(
-            student_id=student_id,
-            cookie_id=cookie_id,
-            coupon_code=coupon_data.code
-        )
-        
-        if cart_summary["coupon_applied"]:
-            return SayanSuccessResponse(
-                data=cart_summary,
-                message="تم تطبيق الكوبون بنجاح",
-                request=request
-            )
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={"message": "كوبون غير صالح أو منتهي الصلاحية", "error_type": "Bad Request"}
-            )
-            
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"message": f"خطأ في تطبيق الكوبون: {str(e)}", "error_type": "Internal Server Error"}
-        )
-
-
-@router.post("/merge-guest-cart")
-def merge_guest_cart(
-    request: Request,
-    db: Session = Depends(get_db),
-    current_user: Student = Depends(get_current_student),
-    the_cookie: Optional[str] = Header(None, alias="TheCookie")
-) -> Any:
-    try:
-        cart_service = CartService(db)
-        
-        cookie_id = cart_service.extract_cookie_id(the_cookie)
-        
-        if not cookie_id:
-            return SayanSuccessResponse(
-                data={"items_merged": 0},
-                message="لا توجد سلة ضيف للدمج",
-                request=request
-            )
-        
-        result = cart_service.merge_guest_cart_to_student(
-            student_id=current_user.id,
-            cookie_id=cookie_id
-        )
-        
-        return SayanSuccessResponse(
-            data={"items_merged": result["items_merged"]},
-            message=result["message"],
-            request=request
-        )
-        
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"message": f"خطأ في دمج السلة: {str(e)}", "error_type": "Internal Server Error"}
+            detail={"message": f"خطأ في مسح السلة: {str(e)}"}
         ) 

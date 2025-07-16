@@ -132,7 +132,7 @@ class AuthService:
     def create_tokens(self, user_id: int, user_type: str) -> Dict[str, str]:
         """Create access and refresh tokens"""
         
-        # استخدام نفس النظام المُتبع في security.py
+        # Using the same system as security.py
         access_token = security.create_access_token(
             subject=user_id,
             user_type=user_type

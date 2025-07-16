@@ -103,7 +103,9 @@ class Course(Base):
     chapters = relationship("Chapter", back_populates="course", cascade="all, delete-orphan", lazy="dynamic")
     lessons = relationship("Lesson", back_populates="course", cascade="all, delete-orphan")
     student_enrollments = relationship("StudentCourse", back_populates="course")
-    cart_items = relationship("Cart", back_populates="course")
+    
+    # AI Assistant relationships
+    ai_exam_templates = relationship("AIExamTemplate", back_populates="course", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Course(id={self.id}, course_state='{self.course_state}')>"

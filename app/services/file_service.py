@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime
 
 class FileService:
-    """File and image management service"""
+    """File and image management service with video support"""
     
     def __init__(self):
         self.upload_dir = Path("static/uploads")
@@ -16,23 +16,27 @@ class FileService:
         self.academy_covers_dir = self.upload_dir / "academy" / "covers"
         self.profile_images_dir = self.upload_dir / "profiles"
         self.courses_dir = self.upload_dir / "courses"
+        self.videos_dir = self.upload_dir / "videos"
         
-        # Create directories if they don't exist
         self._create_directories()
         
-        # Allowed file types
         self.allowed_image_types = {
             "image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp"
         }
         
-        # Maximum file size (5MB)
-        self.max_file_size = 5 * 1024 * 1024
+        self.allowed_video_types = {
+            "video/mp4", "video/avi", "video/mov", "video/wmv", "video/flv",
+            "video/webm", "video/mkv", "video/quicktime", "video/x-msvideo",
+            "video/x-ms-wmv", "video/3gpp", "video/x-flv"
+        }
         
-        # Image dimensions
+        self.max_file_size = 5 * 1024 * 1024
+        self.max_video_size = None  # بدون حد أقصى للفيديوهات
+        
         self.logo_size = (400, 400)
         self.cover_size = (1200, 300)
         self.profile_size = (200, 200)
-        self.course_image_size = (800, 450)  # 16:9 aspect ratio for course images
+        self.course_image_size = (800, 450)
     
     def _create_directories(self):
         """Create required directories"""
@@ -41,7 +45,8 @@ class FileService:
             self.academy_logos_dir,
             self.academy_covers_dir,
             self.profile_images_dir,
-            self.courses_dir
+            self.courses_dir,
+            self.videos_dir
         ]
         
         for directory in directories:
@@ -61,6 +66,23 @@ class FileService:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"File too large. Maximum size: {self.max_file_size / (1024*1024):.1f} MB"
+            )
+        
+        return True
+    
+    def _validate_video_file(self, file: UploadFile) -> bool:
+        """Validate video file type and size"""
+        if file.content_type not in self.allowed_video_types:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"نوع الفيديو غير مدعوم. الأنواع المدعومة: {', '.join(self.allowed_video_types)}"
+            )
+        
+        # التحقق من الحجم فقط إذا كان هناك حد أقصى محدد
+        if self.max_video_size is not None and hasattr(file, 'size') and file.size and file.size > self.max_video_size:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"حجم الفيديو كبير جداً. الحد الأقصى: {self.max_video_size / (1024*1024):.0f} ميجابايت"
             )
         
         return True
@@ -220,6 +242,39 @@ class FileService:
                 detail=f"File upload failed: {str(e)}"
             )
     
+    async def save_video_file(self, file: UploadFile, subfolder: str = "videos") -> str:
+        """Save video file with validation and return relative path"""
+        try:
+            self._validate_video_file(file)
+            
+            subfolder_dir = self.upload_dir / subfolder
+            subfolder_dir.mkdir(parents=True, exist_ok=True)
+            
+            filename = self._generate_filename(file.filename)
+            file_path = subfolder_dir / filename
+            
+            await file.seek(0)
+            
+            with open(file_path, "wb") as buffer:
+                while True:
+                    chunk = await file.read(8192)
+                    if not chunk:
+                        break
+                    buffer.write(chunk)
+            
+            return f"{subfolder}/{filename}"
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            if 'file_path' in locals() and file_path.exists():
+                file_path.unlink()
+            
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"فشل في رفع الفيديو: {str(e)}"
+            )
+
     def delete_file(self, file_path: str) -> bool:
         """Delete file"""
         try:

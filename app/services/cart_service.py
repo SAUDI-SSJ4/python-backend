@@ -3,508 +3,458 @@ Cart service for managing shopping cart operations.
 Supports both authenticated students and guest users through cookies.
 """
 
-from typing import List, Optional, Dict, Any, Union
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
-from datetime import datetime, timedelta
-from decimal import Decimal
+from typing import List, Optional, Dict, Any
 import uuid
+from datetime import datetime, timedelta
 
-from app.models.cart import Cart, ItemType
+from app.models.cart import Cart
+from app.models.product import Product
 from app.models.course import Course
+from app.models.product import DigitalProduct
 from app.models.student import Student
-from app.models.product import Product, DigitalProduct
-from app.models.payment import Coupon, CouponUsage
-from app.core.config import settings
+from app.core.response_handler import ResponseHandler
 
 
 class CartService:
-    
-    def __init__(self, db: Session):
-        self.db = db
-    
-    def extract_cookie_id(self, cookie_header: Optional[str]) -> Optional[str]:
-        """Extract cookie ID from header safely"""
-        if not cookie_header:
-            return None
-        
-        if '=' in cookie_header:
-            parts = cookie_header.split('=', 1)
-            if len(parts) > 1 and parts[1].strip():
-                return parts[1].strip()
-        else:
-            return cookie_header.strip()
-        
-        return None
-    
-    def get_or_create_cookie_id(self, cookie_id: Optional[str] = None) -> str:
-        if cookie_id:
-            return cookie_id
-        return str(uuid.uuid4())
-    
-    def get_cart_items(
-        self, 
-        student_id: Optional[int] = None, 
-        cookie_id: Optional[str] = None,
-        session_id: Optional[str] = None
-    ) -> List[Cart]:
-        query = self.db.query(Cart).filter(Cart.deleted_at.is_(None))
-        
-        if student_id:
-            query = query.filter(
-                or_(
-                    Cart.student_id == student_id,
-                    Cart.cookie_id == cookie_id
-                )
-            )
-        elif cookie_id:
-            query = query.filter(Cart.cookie_id == cookie_id)
-        elif session_id:
-            query = query.filter(
-                and_(
-                    Cart.student_id.is_(None),
-                    Cart.session_id == session_id
-                )
-            )
-        else:
-            return []
-        
-        return query.all()
-    
+    @staticmethod
     def add_to_cart(
-        self,
+        db: Session,
         item_type: str,
         item_id: str,
         student_id: Optional[int] = None,
-        cookie_id: Optional[str] = None,
-        session_id: Optional[str] = None,
-        quantity: int = 1
-    ) -> Dict[str, Any]:
+        cookie_id: Optional[str] = None
+    ) -> dict:
+        """Add item to cart using unified product reference"""
         try:
-            if item_type not in ['course', 'digital_product']:
-                raise ValueError("Invalid item type")
+            # Get product ID from item_type and item_id
+            product_id = CartService._get_product_id(db, item_type, item_id)
+            if not product_id:
+                return ResponseHandler.error(
+                    message=f"المنتج غير موجود أو غير مرتبط بجدول المنتجات (نوع: {item_type}, معرف: {item_id})",
+                    status_code=404
+                )
             
-            item = self._get_item(item_type, item_id)
-            if not item:
-                raise ValueError(f"{item_type.title()} not found")
-            
-            if hasattr(item, 'is_published') and not item.is_published:
-                raise ValueError(f"{item_type.title()} is not available for purchase")
-            
-            price = getattr(item, 'price', 0)
-            if hasattr(item, 'current_price'):
-                price = item.current_price
-            
-            if not student_id and not cookie_id:
-                cookie_id = self.get_or_create_cookie_id()
-            
-            existing_item = self._get_existing_cart_item(
-                item_type, item_id, student_id, cookie_id, session_id
+            # Check if item already exists (no duplicates allowed)
+            existing_item = CartService._get_existing_cart_item(
+                db, product_id, student_id, cookie_id
             )
             
             if existing_item:
-                existing_item.quantity += quantity
-                existing_item.updated_at = datetime.utcnow()
-                self.db.commit()
-                return {
-                    "message": "Cart item quantity updated",
-                    "item": existing_item,
-                    "action": "updated",
-                    "cookie_id": cookie_id
+                return ResponseHandler.error(
+                    message="المنتج موجود بالفعل في السلة",
+                    status_code=400
+                )
+            
+            # Create new cart item
+            cart_item = Cart(
+                id=str(uuid.uuid4()),
+                student_id=student_id,
+                cookie_id=cookie_id,
+                product_id=product_id
+            )
+            
+            db.add(cart_item)
+            db.commit()
+            db.refresh(cart_item)
+            
+            return ResponseHandler.success(
+                message="تم إضافة المنتج إلى السلة بنجاح",
+                data={
+                    "cart_id": cart_item.id,
+                    "product_id": product_id,
+                    "item_type": item_type,
+                    "item_id": item_id
                 }
+            )
+            
+        except Exception as e:
+            try:
+                db.rollback()
+            except:
+                pass
+            
+            # Check if it's a connection error
+            if "Lost connection" in str(e) or "Can't connect" in str(e):
+                return ResponseHandler.error(
+                    message="مشكلة في الاتصال بقاعدة البيانات. يرجى المحاولة مرة أخرى.",
+                    status_code=503
+                )
             else:
-                cart_item = Cart(
-                    student_id=student_id,
-                    cookie_id=cookie_id,
-                    session_id=session_id if not student_id else None,
-                    item_type=ItemType(item_type),
-                    item_id=item_id,
-                    quantity=quantity,
-                    price=price
+                return ResponseHandler.error(
+                    message=f"خطأ في إضافة المنتج: {str(e)}",
+                    status_code=500
                 )
-                
-                if item_type == 'course':
-                    cart_item.course_id = item_id
-                    cart_item.academy_id = getattr(item, 'academy_id', None)
-                elif item_type == 'digital_product':
-                    cart_item.digital_product_id = item_id
-                
-                self.db.add(cart_item)
-                self.db.commit()
-                self.db.refresh(cart_item)
-                
-                return {
-                    "message": "Item added to cart",
-                    "item": cart_item,
-                    "action": "added",
-                    "cookie_id": cookie_id
-                }
-        except Exception as e:
-            self.db.rollback()
-            raise e
-    
-    def remove_from_cart(
-        self,
-        cart_item_id: int,
-        student_id: Optional[int] = None,
-        cookie_id: Optional[str] = None,
-        session_id: Optional[str] = None
-    ) -> Dict[str, Any]:
+
+    @staticmethod
+    def _get_product_id(db: Session, item_type: str, item_id: str) -> Optional[int]:
+        """Get product ID based on item type and item ID - with improved error handling"""
         try:
-            cart_item = self._get_cart_item(cart_item_id, student_id, cookie_id, session_id)
-            
-            if not cart_item:
-                raise ValueError("Cart item not found")
-            
-            cart_item.soft_delete()
-            self.db.commit()
-            
-            return {
-                "message": "Item removed from cart",
-                "item_id": cart_item_id
-            }
-        except Exception as e:
-            self.db.rollback()
-            raise e
-    
-    def update_cart_item(
-        self,
-        cart_item_id: int,
-        quantity: int,
-        student_id: Optional[int] = None,
-        cookie_id: Optional[str] = None,
-        session_id: Optional[str] = None
-    ) -> Dict[str, Any]:
-        try:
-            if quantity <= 0:
-                return self.remove_from_cart(cart_item_id, student_id, cookie_id, session_id)
-            
-            cart_item = self._get_cart_item(cart_item_id, student_id, cookie_id, session_id)
-            
-            if not cart_item:
-                raise ValueError("Cart item not found")
-            
-            cart_item.quantity = quantity
-            cart_item.updated_at = datetime.utcnow()
-            self.db.commit()
-            
-            return {
-                "message": "Cart item updated",
-                "item": cart_item
-            }
-        except Exception as e:
-            self.db.rollback()
-            raise e
-    
-    def clear_cart(
-        self,
-        student_id: Optional[int] = None,
-        cookie_id: Optional[str] = None,
-        session_id: Optional[str] = None
-    ) -> Dict[str, Any]:
-        try:
-            cart_items = self.get_cart_items(student_id, cookie_id, session_id)
-            
-            for item in cart_items:
-                item.soft_delete()
-            
-            self.db.commit()
-            
-            return {
-                "message": "Cart cleared successfully",
-                "items_cleared": len(cart_items)
-            }
-        except Exception as e:
-            self.db.rollback()
-            raise e
-    
-    def get_cart_summary(
-        self,
-        student_id: Optional[int] = None,
-        cookie_id: Optional[str] = None,
-        session_id: Optional[str] = None,
-        coupon_code: Optional[str] = None
-    ) -> Dict[str, Any]:
-        cart_items = self.get_cart_items(student_id, cookie_id, session_id)
-        
-        if not cart_items:
-            return {
-                "items": [],
-                "subtotal": 0.00,
-                "tax_amount": 0.00,
-                "discount_amount": 0.00,
-                "total": 0.00,
-                "currency": "SAR",
-                "items_count": 0,
-                "total_quantity": 0,
-                "coupon_applied": None
-            }
-        
-        subtotal = sum(item.total_price for item in cart_items)
-        
-        discount_amount = 0.00
-        coupon_applied = None
-        
-        if coupon_code:
-            coupon_result = self.apply_coupon(coupon_code, subtotal, student_id)
-            if coupon_result["valid"]:
-                discount_amount = coupon_result["discount_amount"]
-                coupon_applied = coupon_result["coupon"]
-        
-        tax_rate = Decimal('0.15')
-        discounted_subtotal = subtotal - discount_amount
-        tax_amount = discounted_subtotal * tax_rate
-        total = discounted_subtotal + tax_amount
-        
-        items_data = []
-        for item in cart_items:
-            item_details = item.get_item_details()
-            if item_details:
-                items_data.append({
-                    "cart_id": item.id,
-                    "item_id": item.item_id,
-                    "item_type": item.item_type.value,
-                    "title": item_details['title'],
-                    "price": item_details['price'],
-                    "image": item_details['image'],
-                    "quantity": item.quantity,
-                    "total_price": item.total_price
-                })
-        
-        return {
-            "items": items_data,
-            "subtotal": float(subtotal),
-            "tax_amount": float(tax_amount),
-            "discount_amount": float(discount_amount),
-            "total": float(total),
-            "currency": "SAR",
-            "items_count": len(cart_items),
-            "total_quantity": sum(item.quantity for item in cart_items),
-            "coupon_applied": coupon_applied
-        }
-    
-    def apply_coupon(
-        self,
-        coupon_code: str,
-        subtotal: Decimal,
-        student_id: Optional[int] = None
-    ) -> Dict[str, Any]:
-        coupon_code = coupon_code.strip().upper()
-        
-        coupon = self.db.query(Coupon).filter(
-            and_(
-                Coupon.code == coupon_code,
-                Coupon.is_active == True
-            )
-        ).first()
-        
-        if not coupon:
-            return {"valid": False, "error": "كوبون غير صالح"}
-        
-        current_date = datetime.now().date()
-        if coupon.start_date and current_date < coupon.start_date:
-            return {"valid": False, "error": "الكوبون لم يصبح ساري المفعول بعد"}
-        
-        if coupon.end_date and current_date > coupon.end_date:
-            return {"valid": False, "error": "انتهت صلاحية الكوبون"}
-        
-        if coupon.minimum_amount and subtotal < coupon.minimum_amount:
-            return {"valid": False, "error": f"الحد الأدنى للطلب هو {float(coupon.minimum_amount)} ريال سعودي"}
-        
-        if coupon.maximum_amount and subtotal > coupon.maximum_amount:
-            return {"valid": False, "error": f"الحد الأقصى للطلب هو {float(coupon.maximum_amount)} ريال سعودي"}
-        
-        if coupon.usage_limit and coupon.usage_count >= coupon.usage_limit:
-            return {"valid": False, "error": "تم استنفاد عدد مرات استخدام هذا الكوبون"}
-        
-        if student_id and coupon.usage_limit_per_user:
-            user_usage = self.db.query(CouponUsage).filter(
-                and_(
-                    CouponUsage.coupon_id == coupon.id,
-                    CouponUsage.student_id == student_id
-                )
-            ).count()
-            
-            if user_usage >= coupon.usage_limit_per_user:
-                return {"valid": False, "error": "لقد وصلت للحد الأقصى من استخدام هذا الكوبون"}
-        
-        discount_amount = Decimal('0')
-        
-        if coupon.discount_type == "percentage":
-            discount_amount = subtotal * (coupon.discount_value / 100)
-            if coupon.maximum_discount_amount:
-                discount_amount = min(discount_amount, coupon.maximum_discount_amount)
-        elif coupon.discount_type == "fixed":
-            discount_amount = min(coupon.discount_value, subtotal)
-        else:
-            return {"valid": False, "error": "نوع خصم غير مدعوم"}
-        
-        discount_amount = min(discount_amount, subtotal)
-        
-        return {
-            "valid": True,
-            "coupon": {
-                "id": coupon.id,
-                "code": coupon.code,
-                "name": coupon.name,
-                "description": coupon.description,
-                "discount_type": coupon.discount_type,
-                "discount_value": float(coupon.discount_value),
-                "minimum_amount": float(coupon.minimum_amount) if coupon.minimum_amount else None,
-                "maximum_amount": float(coupon.maximum_amount) if coupon.maximum_amount else None,
-                "maximum_discount_amount": float(coupon.maximum_discount_amount) if coupon.maximum_discount_amount else None,
-                "usage_count": coupon.usage_count,
-                "usage_limit": coupon.usage_limit,
-                "usage_limit_per_user": coupon.usage_limit_per_user,
-                "start_date": coupon.start_date.isoformat() if coupon.start_date else None,
-                "end_date": coupon.end_date.isoformat() if coupon.end_date else None
-            },
-            "discount_amount": float(discount_amount),
-            "final_amount": float(subtotal - discount_amount)
-        }
-    
-    def merge_guest_cart_to_student(
-        self,
-        student_id: int,
-        cookie_id: str
-    ) -> Dict[str, Any]:
-        try:
-            guest_items = self.get_cart_items(cookie_id=cookie_id)
-            
-            if not guest_items:
-                return {
-                    "message": "No guest cart items to merge",
-                    "items_merged": 0
-                }
-            
-            merged_count = 0
-            
-            for guest_item in guest_items:
-                existing_item = self._get_existing_cart_item(
-                    guest_item.item_type.value,
-                    guest_item.item_id,
-                    student_id,
-                    None,
-                    None
-                )
+            if item_type == "course":
+                # Try raw SQL first (more efficient)
+                try:
+                    from sqlalchemy import text
+                    result = db.execute(
+                        text("SELECT product_id FROM courses WHERE id = :course_id LIMIT 1"),
+                        {"course_id": item_id}
+                    ).fetchone()
+                    
+                    if result and result.product_id:
+                        return result.product_id
+                    elif result:
+                        print(f"Course found but no product_id: {item_id}")
+                        return None
+                    else:
+                        print(f"Course not found: {item_id}")
+                        return None
+                        
+                except Exception as sql_error:
+                    print(f"Raw SQL failed, trying ORM: {sql_error}")
+                    # Fallback to ORM
+                    course = db.query(Course).filter(Course.id == item_id).first()
+                    if course:
+                        if course.product_id:
+                            return course.product_id
+                        else:
+                            print(f"Course found but no product_id: {item_id}")
+                            return None
+                    else:
+                        print(f"Course not found: {item_id}")
+                        return None
                 
-                if existing_item:
-                    existing_item.quantity += guest_item.quantity
-                    existing_item.updated_at = datetime.utcnow()
-                else:
-                    guest_item.student_id = student_id
-                    guest_item.updated_at = datetime.utcnow()
-                    merged_count += 1
+            elif item_type == "digital_product":
+                # Try raw SQL first
+                try:
+                    from sqlalchemy import text
+                    result = db.execute(
+                        text("SELECT product_id FROM digital_products WHERE id = :item_id LIMIT 1"),
+                        {"item_id": item_id}
+                    ).fetchone()
+                    
+                    if result and result.product_id:
+                        return result.product_id
+                    elif result:
+                        print(f"DigitalProduct found but no product_id: {item_id}")
+                        return None
+                    else:
+                        print(f"DigitalProduct not found: {item_id}")
+                        return None
+                        
+                except Exception as sql_error:
+                    print(f"Raw SQL failed, trying ORM: {sql_error}")
+                    # Fallback to ORM
+                    digital_product = db.query(DigitalProduct).filter(DigitalProduct.id == item_id).first()
+                    if digital_product:
+                        if digital_product.product_id:
+                            return digital_product.product_id
+                        else:
+                            print(f"DigitalProduct found but no product_id: {item_id}")
+                            return None
+                    else:
+                        print(f"DigitalProduct not found: {item_id}")
+                        return None
                 
-                guest_item.student_id = student_id
+            return None
             
-            self.db.commit()
-            
-            return {
-                "message": f"Successfully merged {merged_count} items from guest cart",
-                "items_merged": merged_count
-            }
         except Exception as e:
-            self.db.rollback()
-            raise e
-    
-    def _get_item(self, item_type: str, item_id: str) -> Optional[Any]:
-        if item_type == 'course':
-            return self.db.query(Course).filter(Course.id == item_id).first()
-        elif item_type == 'digital_product':
-            return self.db.query(DigitalProduct).filter(DigitalProduct.id == item_id).first()
-        return None
-    
+            print(f"Error getting product_id: {e}")
+            try:
+                db.rollback()
+            except:
+                pass
+            return None
+
+    @staticmethod
     def _get_existing_cart_item(
-        self,
-        item_type: str,
-        item_id: str,
-        student_id: Optional[int] = None,
-        cookie_id: Optional[str] = None,
-        session_id: Optional[str] = None
+        db: Session,
+        product_id: int,
+        student_id: Optional[int],
+        cookie_id: Optional[str]
     ) -> Optional[Cart]:
-        query = self.db.query(Cart).filter(
-            and_(
-                Cart.item_type == ItemType(item_type),
-                Cart.item_id == item_id,
-                Cart.deleted_at.is_(None)
-            )
-        )
-        
-        if student_id:
-            query = query.filter(
-                or_(
-                    Cart.student_id == student_id,
-                    Cart.cookie_id == cookie_id
-                )
-            )
-        elif cookie_id:
-            query = query.filter(Cart.cookie_id == cookie_id)
-        elif session_id:
-            query = query.filter(
-                and_(
-                    Cart.student_id.is_(None),
-                    Cart.session_id == session_id
-                )
-            )
-        else:
-            return None
-        
-        return query.first()
-    
-    def _get_cart_item(
-        self,
-        cart_item_id: int,
-        student_id: Optional[int] = None,
-        cookie_id: Optional[str] = None,
-        session_id: Optional[str] = None
-    ) -> Optional[Cart]:
-        query = self.db.query(Cart).filter(
-            and_(
-                Cart.id == cart_item_id,
-                Cart.deleted_at.is_(None)
-            )
-        )
-        
-        if student_id:
-            query = query.filter(
-                or_(
-                    Cart.student_id == student_id,
-                    Cart.cookie_id == cookie_id
-                )
-            )
-        elif cookie_id:
-            query = query.filter(Cart.cookie_id == cookie_id)
-        elif session_id:
-            query = query.filter(
-                and_(
-                    Cart.student_id.is_(None),
-                    Cart.session_id == session_id
-                )
-            )
-        else:
-            return None
-        
-        return query.first()
-    
-    def cleanup_expired_guest_carts(self, days: int = 30) -> int:
+        """Find existing cart item by product ID - check both student and guest carts"""
         try:
-            expiry_date = datetime.utcnow() - timedelta(days=days)
+            # Build base query for this product
+            base_query = db.query(Cart).filter(Cart.product_id == product_id)
             
-            expired_items = self.db.query(Cart).filter(
-                and_(
-                    Cart.student_id.is_(None),
-                    Cart.created_at < expiry_date,
-                    Cart.deleted_at.is_(None)
+            # If user is authenticated, check both student cart and guest cart
+            if student_id:
+                # Check if student already has this product
+                student_item = base_query.filter(Cart.student_id == student_id).first()
+                if student_item:
+                    return student_item
+                
+                # Also check if there's a guest item with this cookie
+                if cookie_id:
+                    guest_item = base_query.filter(
+                        and_(Cart.cookie_id == cookie_id, Cart.student_id.is_(None))
+                    ).first()
+                    if guest_item:
+                        return guest_item
+                        
+            elif cookie_id:
+                # For guest users, only check guest cart
+                return base_query.filter(
+                    and_(Cart.cookie_id == cookie_id, Cart.student_id.is_(None))
+                ).first()
+                
+            return None
+        except Exception:
+            return None
+
+    @staticmethod
+    def get_cart_items(
+        db: Session,
+        student_id: Optional[int] = None,
+        cookie_id: Optional[str] = None
+    ) -> dict:
+        """Get all cart items for user"""
+        try:
+            # Migrate guest cart if authenticated user
+            if student_id and cookie_id:
+                CartService._migrate_guest_cart(db, student_id, cookie_id)
+            
+            # Build query
+            query = db.query(Cart)
+            
+            if student_id:
+                query = query.filter(Cart.student_id == student_id)
+            elif cookie_id:
+                query = query.filter(
+                    and_(Cart.cookie_id == cookie_id, Cart.student_id.is_(None))
                 )
+            else:
+                return ResponseHandler.success(
+                    message="السلة فارغة",
+                    data={
+                        "items": [],
+                        "total": 0,
+                        "count": 0,
+                        "currency": "SAR"
+                    }
+                )
+            
+            cart_items = query.all()
+            
+            if not cart_items:
+                return ResponseHandler.success(
+                    message="السلة فارغة",
+                    data={
+                        "items": [],
+                        "total": 0,
+                        "count": 0,
+                        "currency": "SAR"
+                    }
+                )
+            
+            # Calculate totals
+            total = sum(item.price for item in cart_items)
+            
+            items_data = []
+            for item in cart_items:
+                item_details = item.get_item_details()
+                item_details['cart_id'] = item.id
+                items_data.append(item_details)
+            
+            return ResponseHandler.success(
+                message=f"تم العثور على {len(cart_items)} منتجات في السلة",
+                data={
+                    "items": items_data,
+                    "total": total,
+                    "count": len(cart_items),
+                    "currency": "SAR"
+                }
+            )
+            
+        except Exception as e:
+            return ResponseHandler.error(
+                message=f"خطأ في استرجاع السلة: {str(e)}",
+                status_code=500
+            )
+
+    @staticmethod
+    def _migrate_guest_cart(db: Session, student_id: int, cookie_id: str):
+        """Migrate guest cart items to authenticated user"""
+        try:
+            # Find guest cart items
+            guest_items = db.query(Cart).filter(
+                and_(Cart.cookie_id == cookie_id, Cart.student_id.is_(None))
             ).all()
             
-            for item in expired_items:
-                item.soft_delete()
+            if not guest_items:
+                return
             
-            self.db.commit()
+            # Update guest items to be owned by the student
+            for item in guest_items:
+                # Check if student already has this product
+                existing = db.query(Cart).filter(
+                    and_(
+                        Cart.student_id == student_id,
+                        Cart.product_id == item.product_id
+                    )
+                ).first()
+                
+                if existing:
+                    # Delete duplicate guest item
+                    db.delete(item)
+                else:
+                    # Transfer ownership
+                    item.student_id = student_id
+                    item.updated_at = datetime.utcnow()
             
-            return len(expired_items)
+            db.commit()
+            
         except Exception as e:
-            self.db.rollback()
-            raise e 
+            db.rollback()
+            print(f"Error migrating guest cart: {e}")
+
+    @staticmethod
+    def remove_from_cart(
+        db: Session,
+        cart_id: str,
+        student_id: Optional[int] = None,
+        cookie_id: Optional[str] = None
+    ) -> dict:
+        """Remove item from cart by cart_id"""
+        try:
+            # Build query to find the cart item
+            query = db.query(Cart).filter(Cart.id == cart_id)
+            
+            # Add ownership filter
+            if student_id:
+                query = query.filter(Cart.student_id == student_id)
+            elif cookie_id:
+                query = query.filter(
+                    and_(Cart.cookie_id == cookie_id, Cart.student_id.is_(None))
+                )
+            else:
+                return ResponseHandler.error(
+                    message="غير مخول لحذف هذا العنصر",
+                    status_code=401
+                )
+            
+            cart_item = query.first()
+            
+            if not cart_item:
+                return ResponseHandler.error(
+                    message="العنصر غير موجود في السلة",
+                    status_code=404
+                )
+            
+            # Store item details for response
+            item_details = cart_item.get_item_details()
+            
+            # Remove the item
+            db.delete(cart_item)
+            db.commit()
+            
+            return ResponseHandler.success(
+                message="تم حذف المنتج من السلة بنجاح",
+                data={
+                    "removed_item": item_details,
+                    "cart_id": cart_id
+                }
+            )
+            
+        except Exception as e:
+            db.rollback()
+            return ResponseHandler.error(
+                message=f"خطأ في حذف المنتج: {str(e)}",
+                status_code=500
+            )
+
+    @staticmethod
+    def clear_cart(
+        db: Session,
+        student_id: Optional[int] = None,
+        cookie_id: Optional[str] = None
+    ) -> dict:
+        """Clear cart with priority for authenticated users"""
+        try:
+            deleted_count = 0
+            
+            if student_id:
+                # Clear authenticated user's cart
+                cart_items = db.query(Cart).filter(Cart.student_id == student_id).all()
+                for item in cart_items:
+                    db.delete(item)
+                deleted_count = len(cart_items)
+                
+            elif cookie_id:
+                # Clear guest cart
+                cart_items = db.query(Cart).filter(
+                    and_(Cart.cookie_id == cookie_id, Cart.student_id.is_(None))
+                ).all()
+                for item in cart_items:
+                    db.delete(item)
+                deleted_count = len(cart_items)
+                
+            else:
+                return ResponseHandler.error(
+                    message="لا يمكن تحديد السلة المراد مسحها",
+                    status_code=400
+                )
+            
+            if deleted_count > 0:
+                db.commit()
+                return ResponseHandler.success(
+                    message=f"تم مسح {deleted_count} منتجات من السلة",
+                    data={
+                        "deleted_count": deleted_count,
+                        "user_type": "authenticated" if student_id else "guest"
+                    }
+                )
+            else:
+                return ResponseHandler.success(
+                    message="السلة فارغة بالفعل",
+                    data={
+                        "deleted_count": 0,
+                        "user_type": "authenticated" if student_id else "guest"
+                    }
+                )
+                
+        except Exception as e:
+            db.rollback()
+            return ResponseHandler.error(
+                message=f"خطأ في مسح السلة: {str(e)}",
+                status_code=500
+            )
+
+    @staticmethod
+    def get_cart_summary(
+        db: Session,
+        student_id: Optional[int] = None,
+        cookie_id: Optional[str] = None
+    ) -> dict:
+        """Get cart summary with totals"""
+        try:
+            cart_result = CartService.get_cart_items(db, student_id, cookie_id)
+            
+            if not cart_result.get("success"):
+                return cart_result
+            
+            cart_data = cart_result.get("data", {})
+            items = cart_data.get("items", [])
+            
+            # Calculate detailed totals
+            subtotal = sum(item.get("price", 0) for item in items)
+            total_discount = sum(item.get("discount_amount", 0) for item in items)
+            total = subtotal - total_discount
+            
+            return ResponseHandler.success(
+                message="ملخص السلة",
+                data={
+                    "count": len(items),
+                    "subtotal": subtotal,
+                    "total_discount": total_discount,
+                    "total": total,
+                    "currency": "SAR",
+                    "items": items
+                }
+            )
+            
+        except Exception as e:
+            return ResponseHandler.error(
+                message=f"خطأ في حساب ملخص السلة: {str(e)}",
+                status_code=500
+            ) 

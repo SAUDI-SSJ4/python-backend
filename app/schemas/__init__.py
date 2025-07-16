@@ -23,6 +23,9 @@ from .authentication import (
     TokenData
 )
 
+# Auth refresh schemas
+from .auth import RefreshTokenRequest
+
 # Google OAuth schemas
 from .google import (
     GoogleLoginRequest,

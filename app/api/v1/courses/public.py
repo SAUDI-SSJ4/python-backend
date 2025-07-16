@@ -1,5 +1,5 @@
 from typing import Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 import random
@@ -42,106 +42,45 @@ def generate_mock_course_public(course_id: int):
         "price": round(random.uniform(99.99, 499.99), 2),
         "discount_price": round(random.uniform(49.99, 299.99), 2) if course_id % 3 == 0 else None,
         "final_price": round(random.uniform(49.99, 299.99), 2) if course_id % 3 == 0 else round(random.uniform(99.99, 499.99), 2),
-        "duration": random.randint(10, 50),  # hours
-        "lessons_count": random.randint(20, 100),
-        "level": random.choice(["BEGINNER", "INTERMEDIATE", "ADVANCED"]),
-        "language": "Arabic",
-        "certificate_enabled": True,
-        "is_featured": course_id <= 5,
         "is_free": course_id % 10 == 0,
-        "views_count": random.randint(100, 5000),
-        "enrollment_count": random.randint(50, 500),
+        "currency": "USD",
+        "level": ["BEGINNER", "INTERMEDIATE", "ADVANCED"][course_id % 3],
+        "language": "Arabic",
+        "duration": f"{random.randint(10, 50)} hours",
+        "lessons_count": random.randint(20, 100),
+        "students_count": random.randint(100, 5000),
         "rating": round(random.uniform(4.0, 5.0), 1),
-        "reviews_count": random.randint(10, 200),
-        "created_at": datetime.now().isoformat(),
-        "requirements": [
-            "Basic computer skills",
-            "Internet connection", 
-            "Willingness to learn"
-        ],
-        "what_will_learn": [
-            "Master the fundamentals",
-            "Build real-world projects", 
-            "Industry best practices",
-            "Hands-on experience"
-        ],
-        "tags": ["programming", "technology", "online", "certification"]
+        "reviews_count": random.randint(50, 1000),
+        "created_at": datetime.now() - timedelta(days=random.randint(1, 365)),
+        "updated_at": datetime.now() - timedelta(days=random.randint(1, 30)),
+        "tags": ["programming", "web", "technology", "education"],
+        "instructor": {
+            "id": course_id % 5 + 1,
+            "name": f"Dr. Ahmed {course_id % 5 + 1}",
+            "avatar": f"https://example.com/instructor-{course_id % 5 + 1}.jpg",
+            "title": "Senior Developer",
+            "experience": f"{random.randint(5, 15)} years"
+        },
+        "certificate": True,
+        "has_preview": True,
+        "enrollment_count": random.randint(100, 5000),
+        "last_updated": datetime.now() - timedelta(days=random.randint(1, 30))
     }
 
 
-def generate_course_curriculum(course_id: int):
-    """Generate course curriculum structure"""
-    chapters = []
-    
-    for chapter_num in range(1, 6):  # 5 chapters
-        chapter = {
-            "id": chapter_num,
-            "title": f"Chapter {chapter_num}: Core Concepts",
-            "description": f"Essential concepts for chapter {chapter_num}",
-            "order": chapter_num,
-            "duration": random.randint(2, 6),  # hours
-            "lessons_count": random.randint(4, 8),
-            "is_free": chapter_num == 1,  # First chapter free
-            "lessons": []
-        }
-        
-        # Add lessons to chapter
-        for lesson_num in range(1, chapter["lessons_count"] + 1):
-            lesson = {
-                "id": (chapter_num - 1) * 10 + lesson_num,
-                "title": f"Lesson {lesson_num}: Important Topic",
-                "description": f"Learn about important topic {lesson_num}",
-                "duration": random.randint(15, 45),  # minutes
-                "order": lesson_num,
-                "is_free": chapter_num == 1 and lesson_num <= 2,  # First 2 lessons of first chapter free
-                "content_type": "video",
-                "has_video": True,
-                "has_resources": random.choice([True, False]),
-                "has_quiz": lesson_num % 3 == 0,
-                "completed": False  # Will be updated based on user progress
-            }
-            chapter["lessons"].append(lesson)
-        
-        chapters.append(chapter)
-    
-    return chapters
-
-
-def generate_course_reviews(course_id: int, limit: int = 5):
-    """Generate course reviews"""
-    reviews = []
-    
-    for i in range(1, limit + 1):
-        review = {
-            "id": i,
-            "student": {
-                "name": f"Student {i}",
-                "avatar": f"https://example.com/avatar-{i}.jpg"
-            },
-            "rating": random.randint(4, 5),
-            "comment": f"Great course! Really helped me understand the concepts. Review number {i}.",
-            "helpful_count": random.randint(5, 50),
-            "created_at": datetime.now().isoformat()
-        }
-        reviews.append(review)
-    
-    return reviews
-
-
-# Public Courses Routes
 @router.get("/public/courses")
 def get_courses(
     skip: int = Query(0, ge=0),
-    limit: int = Query(12, ge=1, le=50),
-    academy_id: Optional[int] = Query(None, description="Filter by academy ID"),
-    search: Optional[str] = None,
-    category: Optional[str] = None,
-    level: Optional[str] = None,
-    price_min: Optional[float] = None,
-    price_max: Optional[float] = None,
-    is_free: Optional[bool] = None,
-    sort_by: str = Query("created_at", pattern="^(created_at|price|rating|popularity|title)$"),
-    order: str = Query("desc", pattern="^(asc|desc)$"),
+    limit: int = Query(20, ge=1, le=100),
+    search: Optional[str] = Query(None, min_length=2),
+    category: Optional[str] = Query(None),
+    level: Optional[str] = Query(None, regex="^(beginner|intermediate|advanced)$"),
+    price_min: Optional[float] = Query(None, ge=0),
+    price_max: Optional[float] = Query(None, ge=0),
+    is_free: Optional[bool] = Query(None),
+    academy_id: Optional[int] = Query(None),
+    sort_by: str = Query("created_at", regex="^(created_at|price|rating|popularity|title)$"),
+    order: str = Query("desc", regex="^(asc|desc)$"),
     current_user = Depends(get_optional_current_user)
 ) -> Any:
     """Get list of all courses (public endpoint)"""
@@ -240,22 +179,21 @@ def get_search_suggestions(
     query: str = Query(..., min_length=2),
     limit: int = Query(10, ge=1, le=20)
 ) -> Any:
-    """Get search suggestions for courses"""
+    """Get search suggestions based on query"""
     suggestions = [
-        "Python Programming",
-        "Web Development",
-        "React.js",
-        "JavaScript",
-        "Data Science",
-        "Machine Learning",
-        "Mobile Development",
-        "UI/UX Design"
+        "Python Programming", "Web Development", "Data Science",
+        "Machine Learning", "Mobile Development", "UI/UX Design",
+        "Digital Marketing", "Business Analysis", "Cybersecurity",
+        "Cloud Computing", "Artificial Intelligence", "React Development"
     ]
     
     # Filter suggestions based on query
-    filtered = [s for s in suggestions if query.lower() in s.lower()]
+    filtered_suggestions = [
+        s for s in suggestions 
+        if query.lower() in s.lower()
+    ]
     
     return {
-        "suggestions": filtered[:limit],
-        "total": len(filtered)
+        "data": filtered_suggestions[:limit],
+        "total": len(filtered_suggestions)
     } 

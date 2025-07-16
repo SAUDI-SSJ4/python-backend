@@ -11,6 +11,45 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy import create_engine, text
 from app.db.session import engine
+from app.core.response_utils import create_error_response, ERROR_MESSAGES, ERROR_TYPES
+from datetime import datetime
+import logging
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
+
+# Setup logging
+logger = logging.getLogger(__name__)
+
+
+class VideoProtectionMiddleware(BaseHTTPMiddleware):
+    """
+    Middleware to protect video files in /static/uploads/lessons/
+    Blocks access to lesson videos while allowing other static files
+    """
+    
+    async def dispatch(self, request: Request, call_next):
+        # Check if request is for lesson videos
+        if request.url.path.startswith("/static/uploads/lessons/"):
+            # Block access to lesson videos
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "status": "error",
+                    "status_code": 403,
+                    "error_type": "ACCESS_DENIED",
+                    "message": "الوصول المباشر للفيديوهات غير مسموح. يرجى استخدام روابط التشغيل المحمية.",
+                    "data": {
+                        "protected_endpoint": "/api/v1/videos/get-video-url/",
+                        "authentication_required": True
+                    },
+                    "path": request.url.path,
+                    "timestamp": datetime.now().isoformat()
+                }
+            )
+        
+        # Allow all other requests to proceed
+        response = await call_next(request)
+        return response
 
 from app.models import (
     User, UserType, UserStatus, AccountType, Student, Gender, Academy, AcademyUser, AcademyStatus, AcademyUserRole,
@@ -68,6 +107,28 @@ except Exception as e:
     videos_available = False
     videos_router = None
     print(f"Failed to load videos router: {e}")
+
+try:
+    from app.api.v1.videos_direct import router as videos_direct_router
+    videos_direct_available = True
+    print("Successfully loaded direct videos router")
+except Exception as e:
+    videos_direct_available = False
+    videos_direct_router = None
+    print(f"Failed to load direct videos router: {e}")
+
+# Force import video test router - DIRECT APPROACH
+print("🔧 DIRECT: Loading video test router...")
+try:
+    from app.api.v1.video_test import router as video_test_router
+    video_test_available = True
+    print("✅ DIRECT: Video test router loaded successfully")
+except Exception as e:
+    video_test_available = False
+    video_test_router = None
+    print(f"❌ DIRECT: Failed to load video test router: {e}")
+    import traceback
+    traceback.print_exc()
 
 try:
     from app.api.v1.students import router as students_router
@@ -168,6 +229,24 @@ except Exception as e:
     interactive_tools_router = None
     print(f"Failed to load interactive tools router: {e}")
 
+try:
+    from app.api.v1.ai_endpoints import router as ai_assistant_router
+    ai_assistant_available = True
+    print("Successfully loaded AI Assistant router")
+except Exception as e:
+    ai_assistant_available = False
+    ai_assistant_router = None
+    print(f"Failed to load AI Assistant router: {e}")
+
+try:
+    from app.api.v1.ai_test_only import router as ai_test_router
+    ai_test_available = True
+    print("Successfully loaded AI Test router")
+except Exception as e:
+    ai_test_available = False
+    ai_test_router = None
+    print(f"Failed to load AI Test router: {e}")
+
 static_dir = Path("static")
 static_dir.mkdir(exist_ok=True)
 (static_dir / "uploads").mkdir(exist_ok=True)
@@ -181,6 +260,9 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
+# Add video protection middleware before mounting static files
+app.add_middleware(VideoProtectionMiddleware)
+
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 app.add_middleware(
@@ -193,55 +275,73 @@ app.add_middleware(
 
 @app.exception_handler(HTTPException)
 async def custom_http_exception_handler(request: Request, exc: HTTPException):
+    # If detail is already a dict with our unified format, use it
     if isinstance(exc.detail, dict):
         error_content = exc.detail.copy()
         error_content["status"] = "error"
         error_content["status_code"] = exc.status_code
         if "error" in error_content and "error_type" not in error_content:
             error_content["error_type"] = error_content.pop("error")
-        allowed_keys = {"status", "status_code", "error_type", "message", "path", "timestamp", "data", "details", "exception_type", "traceback", "debug_info"}
-
+        
+        # Ensure unified format
         error_content.setdefault("path", str(request.url.path))
-
-        from datetime import datetime
         error_content.setdefault("timestamp", datetime.utcnow().isoformat())
-
-        keys_to_remove = [key for key in error_content.keys() if key not in allowed_keys]
-        for key in keys_to_remove:
-            del error_content[key]
-
+        
+        # Clean up any extra keys not in our unified format
+        allowed_keys = {"status", "status_code", "error_type", "message", "path", "timestamp", "data"}
+        error_content = {k: v for k, v in error_content.items() if k in allowed_keys}
+        
         return JSONResponse(status_code=exc.status_code, content=error_content)
 
-    from datetime import datetime
-    error_type_mapping = {
-        400: "Bad Request",
-        401: "Unauthorized",
-        403: "Forbidden",
-        404: "Not Found",
-        422: "Validation Error",
-        500: "Internal Server Error"
-    }
-    error_type = error_type_mapping.get(exc.status_code, "API Error")
-    error_message = str(exc.detail) if exc.detail else "حدث خطأ غير متوقع"
-    error_response = {
-        "status": "error",
-        "status_code": exc.status_code,
-        "error_type": error_type,
-        "message": error_message,
-        "data": None,
-        "path": str(request.url.path),
-        "timestamp": datetime.utcnow().isoformat()
-    }
+    # Use unified error response format
+    error_type = ERROR_TYPES.get(exc.status_code, "API Error")
+    error_message = str(exc.detail) if exc.detail else ERROR_MESSAGES.get(exc.status_code, "حدث خطأ غير متوقع")
+    
+    error_response = create_error_response(
+        message=error_message,
+        status_code=exc.status_code,
+        error_type=error_type,
+        path=str(request.url.path)
+    )
 
     return JSONResponse(status_code=exc.status_code, content=error_response)
 
+
+# Add handler for 404 Not Found errors specifically
+@app.exception_handler(404)
+async def not_found_handler(request: Request, exc):
+    """Handle 404 Not Found errors with unified format"""
+    error_response = create_error_response(
+        message="المورد المطلوب غير موجود",
+        status_code=404,
+        error_type="Not Found",
+        path=str(request.url.path)
+    )
+    return JSONResponse(status_code=404, content=error_response)
+
+
+# Add general exception handler for any other status codes
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    """Handle any other unexpected exceptions"""
+    import traceback
+    
+    # Log the full error for debugging
+    logger.error(f"Unexpected error: {str(exc)}")
+    logger.error(f"Traceback: {traceback.format_exc()}")
+    
+    error_response = create_error_response(
+        message="حدث خطأ داخلي في الخادم",
+        status_code=500,
+        error_type="Internal Server Error",
+        path=str(request.url.path)
+    )
+    return JSONResponse(status_code=500, content=error_response)
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    from datetime import datetime
-
     first_error = exc.errors()[0] if exc.errors() else {}
-    loc = " -> ".join(str(item) for item in first_error.get("loc", []))
-
+    
     def _make_json_serializable(err_list):
         serializable = []
         for err in err_list:
@@ -257,15 +357,22 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         return serializable
 
     errors_serialized = _make_json_serializable(exc.errors()) if exc.errors() else None
+    
+    # Create detailed error message in Arabic
+    if first_error:
+        field_name = " -> ".join(str(item) for item in first_error.get("loc", []))
+        error_msg = first_error.get("msg", "خطأ في التحقق من البيانات")
+        message = f"خطأ في الحقل '{field_name}': {error_msg}"
+    else:
+        message = "خطأ في التحقق من صحة البيانات"
 
-    error_response = {
-        "status": "error",
-        "status_code": 422,
-        "error_type": "Validation Error",
-        "data": {"errors": errors_serialized} if errors_serialized else None,
-        "path": str(request.url.path),
-        "timestamp": datetime.utcnow().isoformat()
-    }
+    error_response = create_error_response(
+        message=message,
+        status_code=422,
+        error_type="Validation Error",
+        path=str(request.url.path),
+        details={"errors": errors_serialized} if errors_serialized else None
+    )
 
     return JSONResponse(status_code=422, content=jsonable_encoder(error_response))
 
@@ -315,6 +422,30 @@ if videos_available:
         tags=["Video Streaming"]
     )
     print("Videos router registered successfully")
+
+if videos_direct_available:
+    app.include_router(
+        videos_direct_router,
+        prefix="/api/v1/videos",
+        tags=["Direct Video Streaming"]
+    )
+    print("Direct videos router registered successfully")
+
+# Force register video test router - DIRECT APPROACH
+print(f"🔧 DIRECT: video_test_available = {video_test_available}")
+if video_test_available and video_test_router:
+    print("🔧 DIRECT: Registering video test router...")
+    app.include_router(
+        video_test_router,
+        prefix="/api/v1/video-test",
+        tags=["Video Test"]
+    )
+    print("✅ DIRECT: Video test router registered successfully!")
+    
+    # Verify registration
+    print(f"🔧 DIRECT: Router routes: {[r.path for r in video_test_router.routes]}")
+else:
+    print("❌ DIRECT: Cannot register video test router - not available or None")
 
 if students_available:
     app.include_router(
@@ -404,6 +535,22 @@ if interactive_tools_available:
     )
     print("Interactive tools router registered successfully")
 
+if ai_assistant_available:
+    app.include_router(
+        ai_assistant_router,
+        prefix="/api/v1",
+        tags=["AI Assistant - فهد"]
+    )
+    print("AI Assistant router registered successfully")
+
+if ai_test_available:
+    app.include_router(
+        ai_test_router,
+        prefix="/api/v1/ai/test",
+        tags=["AI Test"]
+    )
+    print("AI Test router registered successfully")
+
 @app.get("/", summary="Root Endpoint")
 def root():
     return RedirectResponse(url="/docs")
@@ -424,7 +571,8 @@ def health_check():
             "/api/v1/students/* - Student management",
             "/api/v1/cart/* - Shopping cart management",
             "/api/v1/checkout/* - Payment processing",
-            "/api/v1/transaction/* - Payment verification"
+            "/api/v1/transaction/* - Payment verification",
+            "/api/v1/ai/* - AI Assistant endpoints"
         ],
         "features": {
             "authentication": "Available",
@@ -442,7 +590,13 @@ def health_check():
             "coupon_system": "Available",
             "otp_system": "Available",
             "email_service": "Available",
-            "static_files": "Available"
+            "static_files": "Available",
+            "ai_assistant": "Available",
+            "ai_transcription": "Available",
+            "ai_chat": "Available",
+            "ai_exam_correction": "Available",
+            "ai_question_generation": "Available",
+            "ai_summarization": "Available"
         }
     }
 

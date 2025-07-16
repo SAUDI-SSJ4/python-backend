@@ -26,6 +26,8 @@ class Video(Base):
     order_number = Column(Integer, default=0, index=True)
     status = Column(Boolean, default=True, nullable=False)
     duration = Column(Integer, default=0)  # Duration in seconds
+    file_size = Column(Integer, default=0)  # File size in bytes
+    format = Column(String(50))  # Video format/content type
     
     # Timestamps and soft delete
     deleted_at = Column(DateTime)
@@ -34,6 +36,9 @@ class Video(Base):
 
     # Relationships
     lesson = relationship("Lesson", back_populates="videos")
+    
+    # AI Assistant relationships
+    transcriptions = relationship("VideoTranscription", back_populates="video", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Video(id={self.id}, title='{self.title}', lesson_id='{self.lesson_id}')>"

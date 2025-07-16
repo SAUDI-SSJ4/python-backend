@@ -1,5 +1,5 @@
 """
-Payment API endpoints
+Payment API endpoints - Student registration required
 """
 
 from typing import Any, Optional
@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 
 from app.deps.database import get_db
-from app.deps.auth import get_current_student, get_optional_current_user
+from app.deps.auth import get_current_student
 from app.models.student import Student
 from app.services.payment_service import PaymentService
 from app.services.cart_service import CartService
@@ -32,23 +32,29 @@ def process_checkout(
     checkout_data: ProcessCheckoutRequest,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: Optional[Student] = Depends(get_optional_current_user),
+    current_student: Student = Depends(get_current_student),
     the_cookie: Optional[str] = Header(None, alias="TheCookie")
 ) -> Any:
+    """
+    Process checkout for registered students only
+    """
     try:
+        # Initialize services
         payment_service = PaymentService(db)
         cart_service = CartService(db)
         
+        # Extract cookie for cart identification
         cookie_id = cart_service.extract_cookie_id(the_cookie)
-        student_id = current_user.id if current_user else None
         
+        # Create invoice from student's cart
         invoice_result = payment_service.create_invoice_from_cart(
-            student_id=student_id,
+            student_id=current_student.id,
             cookie_id=cookie_id,
             coupon_code=checkout_data.coupon_code,
             billing_info=checkout_data.billing_info
         )
         
+        # Process payment through gateway
         payment_result = payment_service.process_payment(
             invoice_id=invoice_result["invoice_id"],
             success_url=checkout_data.success_url,
@@ -60,7 +66,11 @@ def process_checkout(
                 data={
                     "invoice": invoice_result,
                     "payment": payment_result,
-                    "guest_checkout": invoice_result["guest_checkout"]
+                    "student_info": {
+                        "id": current_student.id,
+                        "name": f"{current_student.user.fname} {current_student.user.lname}",
+                        "email": current_student.user.email
+                    }
                 },
                 message="تم إنشاء طلب الدفع بنجاح",
                 request=request
@@ -94,11 +104,19 @@ def verify_payment(
     payment_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: Optional[Student] = Depends(get_optional_current_user)
+    current_student: Student = Depends(get_current_student)
 ) -> Any:
+    """
+    Verify payment status for registered students
+    """
     try:
         payment_service = PaymentService(db)
-        verification_result = payment_service.verify_payment(payment_id)
+        
+        # Verify payment belongs to current student
+        verification_result = payment_service.verify_payment(
+            payment_id=payment_id,
+            student_id=current_student.id
+        )
         
         return SayanSuccessResponse(
             data=verification_result,
@@ -125,13 +143,16 @@ def get_student_invoices(
     status_filter: Optional[str] = None,
     request: Request = None,
     db: Session = Depends(get_db),
-    current_user: Student = Depends(get_current_student)
+    current_student: Student = Depends(get_current_student)
 ) -> Any:
+    """
+    Get invoices for current student
+    """
     try:
         payment_service = PaymentService(db)
         
         invoices_result = payment_service.get_student_invoices(
-            student_id=current_user.id,
+            student_id=current_student.id,
             status=status_filter,
             skip=skip,
             limit=limit
@@ -155,14 +176,17 @@ def get_invoice_details(
     invoice_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: Student = Depends(get_current_student)
+    current_student: Student = Depends(get_current_student)
 ) -> Any:
+    """
+    Get invoice details for current student
+    """
     try:
         payment_service = PaymentService(db)
         
         invoice_details = payment_service.get_invoice_details(
             invoice_id=invoice_id,
-            student_id=current_user.id
+            student_id=current_student.id
         )
         
         return SayanSuccessResponse(
@@ -186,8 +210,12 @@ def get_invoice_details(
 @router.get("/methods")
 def get_payment_methods(
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_student: Student = Depends(get_current_student)
 ) -> Any:
+    """
+    Get available payment methods for students
+    """
     try:
         moyasar_service = MoyasarService(db)
         payment_methods = moyasar_service.get_payment_methods()
@@ -210,6 +238,9 @@ async def moyasar_webhook(
     request: Request,
     db: Session = Depends(get_db)
 ) -> Any:
+    """
+    Handle Moyasar webhook for payment status updates
+    """
     try:
         moyasar_service = MoyasarService(db)
         
@@ -249,63 +280,67 @@ async def moyasar_webhook(
         )
 
 
-@router.post("/create-invoice")
-def create_invoice(
-    invoice_data: dict,
-    request: Request,
-    db: Session = Depends(get_db)
+@router.get("/student/enrollment-history")
+def get_student_enrollment_history(
+    skip: int = 0,
+    limit: int = 10,
+    request: Request = None,
+    db: Session = Depends(get_db),
+    current_student: Student = Depends(get_current_student)
 ) -> Any:
+    """
+    Get student's course enrollment history
+    """
     try:
-        moyasar_service = MoyasarService(db)
+        payment_service = PaymentService(db)
         
-        result = moyasar_service.create_invoice(
-            amount=invoice_data.get("amount", 10000),
-            currency=invoice_data.get("currency", "SAR"),
-            description=invoice_data.get("description", "Test payment"),
-            success_url=invoice_data.get("success_url"),
-            back_url=invoice_data.get("back_url"),
-            callback_url=invoice_data.get("callback_url")
+        enrollment_history = payment_service.get_student_enrollment_history(
+            student_id=current_student.id,
+            skip=skip,
+            limit=limit
         )
-        
-        if result["success"]:
-            return SayanSuccessResponse(
-                data=result,
-                message="تم إنشاء الفاتورة",
-                request=request
-            )
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={"message": result.get("error"), "error_type": "Payment Error"}
-            )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"message": f"خطأ في إنشاء الفاتورة: {str(e)}", "error_type": "Internal Server Error"}
-        )
-
-
-@router.get("/invoice-status/{invoice_id}")
-def get_invoice_status(
-    invoice_id: str,
-    request: Request,
-    db: Session = Depends(get_db)
-) -> Any:
-    try:
-        moyasar_service = MoyasarService(db)
-        result = moyasar_service.get_invoice_status(invoice_id)
         
         return SayanSuccessResponse(
-            data=result,
-            message="تم الاستعلام عن حالة الفاتورة",
+            data=enrollment_history,
+            message="تم جلب تاريخ التسجيل بنجاح",
             request=request
         )
         
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"message": f"خطأ في الاستعلام عن الفاتورة: {str(e)}", "error_type": "Internal Server Error"}
+            detail={"message": f"خطأ في جلب تاريخ التسجيل: {str(e)}", "error_type": "Internal Server Error"}
+        )
+
+
+@router.get("/student/payment-history")
+def get_student_payment_history(
+    skip: int = 0,
+    limit: int = 10,
+    request: Request = None,
+    db: Session = Depends(get_db),
+    current_student: Student = Depends(get_current_student)
+) -> Any:
+    """
+    Get student's payment transaction history
+    """
+    try:
+        payment_service = PaymentService(db)
+        
+        payment_history = payment_service.get_student_payment_history(
+            student_id=current_student.id,
+            skip=skip,
+            limit=limit
+        )
+        
+        return SayanSuccessResponse(
+            data=payment_history,
+            message="تم جلب تاريخ المدفوعات بنجاح",
+            request=request
+        )
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"message": f"خطأ في جلب تاريخ المدفوعات: {str(e)}", "error_type": "Internal Server Error"}
         ) 

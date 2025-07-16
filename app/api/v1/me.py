@@ -89,7 +89,7 @@ async def get_current_user_profile(
                 })
         
         user_info["academy_memberships"] = academy_memberships
-    
+        
     return SayanSuccessResponse(
         data=user_info,
         message="تم جلب بيانات المستخدم بنجاح",

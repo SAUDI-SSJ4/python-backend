@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Text, Integer, Boolean, DateTime, ForeignKey, Enum as SQLEnum
+from sqlalchemy import Column, String, Text, Integer, Boolean, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.mysql import CHAR
 from sqlalchemy.sql import func
@@ -41,13 +41,13 @@ class Lesson(Base):
     title = Column(String(255), nullable=False, index=True)
     description = Column(Text)
     order_number = Column(Integer, default=0, index=True)
-    type = Column(SQLEnum(LessonType), default=LessonType.VIDEO, nullable=False, index=True)
+    type = Column(String(20), default=LessonType.VIDEO.value, nullable=False, index=True)
     status = Column(Boolean, default=True, nullable=False)
     is_free_preview = Column(Boolean, default=False, nullable=False)
     
     # Video-specific fields
     video = Column(String(255))  # Video file path or URL
-    video_type = Column(SQLEnum(VideoType), default=VideoType.UPLOAD)
+    video_type = Column(String(20), default=VideoType.UPLOAD.value)
     video_provider = Column(String(20))  # Provider name for external videos
     video_duration = Column(Integer, default=0)  # Duration in seconds
     size_bytes = Column(Integer, default=0)  # File size in bytes
@@ -66,7 +66,12 @@ class Lesson(Base):
     exams = relationship("Exam", back_populates="lesson", cascade="all, delete-orphan")
     interactive_tools = relationship("InteractiveTool", back_populates="lesson", cascade="all, delete-orphan")
     # lesson_progress = relationship("LessonProgress", back_populates="lesson", cascade="all, delete-orphan")
-    # ai_answers = relationship("AIAnswer", back_populates="lesson", cascade="all, delete-orphan")
+    
+    # AI Assistant relationships
+    ai_answers = relationship("AIAnswer", back_populates="lesson", cascade="all, delete-orphan")
+    video_transcriptions = relationship("VideoTranscription", back_populates="lesson", cascade="all, delete-orphan")
+    ai_summaries = relationship("LessonSummary", back_populates="lesson", cascade="all, delete-orphan")
+    ai_exam_templates = relationship("AIExamTemplate", back_populates="lesson", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Lesson(id={self.id}, title='{self.title}', type='{self.type}')>"

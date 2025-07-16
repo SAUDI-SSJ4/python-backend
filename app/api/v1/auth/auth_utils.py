@@ -203,7 +203,7 @@ def send_verification_otp(user: User, db: Session):
 
 
 def generate_user_tokens(user: User, db: Session) -> Token:
-    """إنشاء JWT tokens للمستخدم"""
+    """Generate JWT tokens for user with optional additional data"""
     token_data = {
         "user_id": user.id,
         "user_type": user.user_type,
@@ -237,14 +237,17 @@ def generate_user_tokens(user: User, db: Session) -> Token:
     elif user.user_type == "academy":
         user_data["profile_type"] = "academy"
     
-    return create_unified_success_response(
-        data={
+    # Prepare response data
+    response_data = {
             "access_token": access_token,
             "refresh_token": refresh_token,
             "token_type": "bearer",
             "user_type": user.user_type,
             "user_data": user_data
-        },
+    }
+    
+    return create_unified_success_response(
+        data=response_data,
         message="أهلاً بك" if not user.is_verified else "تم تسجيل الدخول بنجاح",
         status_code=201,
         path="/api/v1/auth/login"

@@ -1,7 +1,7 @@
 from pydantic import BaseModel, EmailStr, Field, validator
 from typing import Optional, Dict, Any
+from .base import BaseResponse  # Import unified schema
 from datetime import datetime
-from .base import BaseResponse  # استيراد المخطط الموحد
 
 
 # Base schemas
@@ -523,6 +523,19 @@ class UserInfoResponse(BaseModel):
                 "status": "active",
                 "verified": True,
                 "created_at": "2023-12-01T10:00:00Z"
+            }
+        }
+    } 
+
+
+class RefreshTokenRequest(BaseModel):
+    """Refresh token request schema"""
+    refresh_token: str = Field(..., description="Valid refresh token")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
             }
         }
     } 

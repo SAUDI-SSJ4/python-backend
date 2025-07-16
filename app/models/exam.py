@@ -9,9 +9,6 @@ import uuid
 
 class QuestionType(str, enum.Enum):
     """Question type enumeration for different assessment formats"""
-    SINGLE = "single"           # Single choice (radio buttons)
-    CHOOSE = "choose"          # Multiple choice (checkboxes)  
-    BOOLEAN = "boolean"        # True/False questions
     MULTIPLE_CHOICE = "multiple_choice"  # Traditional multiple choice
     TRUE_FALSE = "true_false"   # True/False questions
     TEXT = "text"              # Text input questions
@@ -38,7 +35,7 @@ class Exam(Base):
     order_number = Column(Integer, default=0, index=True)
     status = Column(Boolean, default=True, nullable=False)
     duration = Column(Integer, default=0)  # Duration in seconds
-    question_type = Column(SQLEnum(QuestionType), default=QuestionType.SINGLE, nullable=False)
+    question_type = Column(SQLEnum(QuestionType), default=QuestionType.MULTIPLE_CHOICE, nullable=False)
     
     # Timestamps
     created_at = Column(DateTime, default=func.now(), nullable=False)
@@ -47,6 +44,9 @@ class Exam(Base):
     # Relationships
     lesson = relationship("Lesson", back_populates="exams")
     questions = relationship("Question", back_populates="exam", cascade="all, delete-orphan")
+    
+    # AI Assistant relationships
+    ai_corrections = relationship("ExamCorrection", back_populates="exam", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Exam(id={self.id}, title='{self.title}', type='{self.question_type}')>"
@@ -105,6 +105,9 @@ class Question(Base):
     # Relationships
     exam = relationship("Exam", back_populates="questions")
     options = relationship("QuestionOption", back_populates="question", cascade="all, delete-orphan")
+    
+    # AI Assistant relationships
+    ai_corrections = relationship("QuestionCorrection", back_populates="question", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Question(id={self.id}, title='{self.title}', type='{self.type}')>"
@@ -112,7 +115,7 @@ class Question(Base):
     @property
     def is_choice_question(self) -> bool:
         """Check if question requires choice options"""
-        return self.type in [QuestionType.MULTIPLE_CHOICE, QuestionType.SINGLE, QuestionType.CHOOSE]
+        return self.type in [QuestionType.MULTIPLE_CHOICE, QuestionType.TEXT, QuestionType.TRUE_FALSE]
     
     @property
     def is_text_question(self) -> bool:
@@ -122,7 +125,7 @@ class Question(Base):
     @property
     def is_boolean_question(self) -> bool:
         """Check if question is true/false type"""
-        return self.type in [QuestionType.BOOLEAN, QuestionType.TRUE_FALSE]
+        return self.type == QuestionType.TRUE_FALSE
 
 
 class QuestionOption(Base):

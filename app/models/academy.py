@@ -52,9 +52,20 @@ class Academy(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
-    # العلاقات
+    # Relationships
     academy_users = relationship("AcademyUser", back_populates="academy")
     coupons = relationship("Coupon", back_populates="academy")
+    
+    # AI Assistant relationships
+    ai_answers = relationship("AIAnswer", back_populates="academy")
+    video_transcriptions = relationship("VideoTranscription", back_populates="academy")
+    exam_corrections = relationship("ExamCorrection", back_populates="academy")
+    lesson_summaries = relationship("LessonSummary", back_populates="academy")
+    ai_exam_templates = relationship("AIExamTemplate", back_populates="academy")
+    ai_conversations = relationship("AIConversation", back_populates="academy")
+    ai_knowledge_base = relationship("AIKnowledgeBase", back_populates="academy")
+    ai_performance_metrics = relationship("AIPerformanceMetric", back_populates="academy")
+    ai_settings = relationship("AISetting", back_populates="academy")
 
 
 class AcademyUser(Base):
@@ -120,4 +131,4 @@ class AcademyWallet(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
-    # Relationships (تم إزالة العلاقة لتجنب المشاكل) 
+    # Relationships (relationship removed to avoid issues) 

@@ -42,6 +42,10 @@ class Student(Base):
     # Course enrollment relationships
     course_enrollments = relationship("StudentCourse", back_populates="student", lazy="dynamic")
     
+    # AI Assistant relationships
+    ai_answers = relationship("AIAnswer", back_populates="student")
+    exam_corrections = relationship("ExamCorrection", back_populates="student")
+    
     # Temporarily disabled relationships until models are properly defined
     # finance = relationship("StudentFinance", back_populates="student", uselist=False)
     # blog_comments = relationship("BlogComment", back_populates="student")

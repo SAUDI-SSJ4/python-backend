@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     # JWT
     SECRET_KEY: str
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 43200  # شهر كامل (30 يوم × 24 ساعة × 60 دقيقة)
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 43200  # Full month (30 days × 24 hours × 60 minutes)
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     # JWT Keys for different user types
@@ -65,11 +65,33 @@ class Settings(BaseSettings):
     # Platform Settings
     PLATFORM_FEE_PERCENTAGE: float = 10.0  # رسوم المنصة كنسبة مئوية
 
+    # Tax Settings
+    TAX_RATE: float = 0.15  # ضريبة القيمة المضافة 15%
+    TAX_ENABLED: bool = True  # تفعيل/إلغاء الضريبة
+    TAX_INCLUSIVE: bool = False  # هل الضريبة مشمولة في السعر أم منفصلة
+
     # Payment Gateway Settings - Moyasar
     MOYASAR_API_KEY: str = ""
+    MOYASAR_PUBLIC_KEY: str = ""
     MOYASAR_WEBHOOK_SECRET: str = ""
     MOYASAR_ENVIRONMENT: str = "test"  # test or live
-    MOYASAR_PUBLIC_KEY: str = ""
+    MOYASAR_BASE_URL: str = "https://api.moyasar.com/v1"
+    MOYASAR_SUCCESS_URL: str = ""
+    MOYASAR_BACK_URL: str = ""
+
+    # AI Assistant Settings - OpenAI Configuration
+    OPENAI_API_KEY: str = ""
+    OPENAI_MODEL: str = "gpt-4"
+    OPENAI_MAX_TOKENS: int = 4000
+    OPENAI_TEMPERATURE: float = 0.7
+    OPENAI_RATE_LIMIT: int = 40
+
+    # AI Features Toggle
+    AI_TRANSCRIPTION_ENABLED: bool = True
+    AI_CHAT_ENABLED: bool = True
+    AI_EXAM_CORRECTION_ENABLED: bool = True
+    AI_QUESTION_GENERATION_ENABLED: bool = True
+    AI_SUMMARIZATION_ENABLED: bool = True
 
     @validator("BACKEND_CORS_ORIGINS", pre=True)
     def assemble_cors_origins(cls, v: Union[str, List[str]]) -> Union[List[str], str]:

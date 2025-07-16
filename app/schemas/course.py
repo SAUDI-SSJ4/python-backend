@@ -190,6 +190,9 @@ class CourseResponse(BaseModel):
     price: Decimal
     discount_price: Optional[Decimal] = None
     discount_ends_at: Optional[datetime] = None
+    
+    # Category object
+    category: Optional[Dict[str, Any]] = None
 
     # Computed properties
     @property
@@ -253,6 +256,18 @@ class CourseResponse(BaseModel):
                         gallery_paths.append(f'/static/uploads/{path}')
                 else:
                     gallery_paths.append(path)
+        # Add category data if available
+        category_data = None
+        if hasattr(course, 'category') and course.category:
+            category_data = {
+                'id': getattr(course.category, 'id', 0),
+                'title': getattr(course.category, 'title', ""),
+                'slug': getattr(course.category, 'slug', ""),
+                'content': getattr(course.category, 'content', ""),
+                'image': getattr(course.category, 'image', None),
+                'status': getattr(course.category, 'status', None)
+            }
+        
         # Create response data
         response_data = {
             "id": getattr(course, 'id', ""),
@@ -281,6 +296,7 @@ class CourseResponse(BaseModel):
             "completion_rate": getattr(course, 'completion_rate', Decimal('0.00')),
             "created_at": getattr(course, 'created_at', datetime.utcnow()),
             "updated_at": getattr(course, 'updated_at', datetime.utcnow()),
+            "category": category_data,
             **product_data
         }
         return cls(**response_data)

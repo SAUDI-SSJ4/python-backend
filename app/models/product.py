@@ -20,7 +20,7 @@ class ProductStatus(str, enum.Enum):
 
 class Product(Base):
     """
-    نموذج Product المحدث ليتطابق مع قاعدة البيانات الجديدة
+    Product model that serves as unified reference for all product types
     """
     __tablename__ = "products"
 
@@ -41,6 +41,7 @@ class Product(Base):
     academy = relationship("Academy")
     courses = relationship("Course", back_populates="product")
     student_products = relationship("StudentProduct", back_populates="product")
+    cart_items = relationship("Cart", back_populates="product")
 
 
 class PackageType(str, enum.Enum):
@@ -73,29 +74,31 @@ class DigitalProduct(Base):
     __tablename__ = "digital_products"
 
     id = Column(Integer, primary_key=True, index=True)
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
     academy_id = Column(Integer, ForeignKey("academies.id"), nullable=False)
-    name = Column(String(255), nullable=False)
+    title = Column(String(255), nullable=False)
     slug = Column(String(255), index=True)
     description = Column(Text, nullable=True)
-    price = Column(Numeric(10, 2), nullable=False)
+    excerpt = Column(String(255), nullable=True)
+    price = Column(Numeric(10, 2), nullable=False, default=0.00)
     discount_price = Column(Numeric(10, 2), nullable=True)
-    file_url = Column(String(500), nullable=True)
-    file_size = Column(Integer, nullable=True)  # In bytes
+    discount_ends_at = Column(DateTime, nullable=True)
+    file = Column(String(255), nullable=True)
     file_type = Column(String(50), nullable=True)
-    thumbnail = Column(String(255), nullable=True)
-    preview_url = Column(String(500), nullable=True)
-    download_limit = Column(Integer, nullable=True)
-    is_active = Column(Boolean, default=True)
-    sales_count = Column(Integer, default=0)
-    rating = Column(Numeric(3, 2), default=0.0)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    file_size_bytes = Column(Integer, nullable=True, default=0)
+    preview_image = Column(String(255), nullable=True)
+    status = Column(String(20), nullable=False, default="draft")
+    downloads_count = Column(Integer, nullable=False, default=0)
+    avg_rating = Column(Numeric(3, 2), nullable=False, default=0.00)
+    ratings_count = Column(Integer, nullable=False, default=0)
+    platform_fee_percentage = Column(Numeric(5, 2), nullable=False, default=0.00)
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
 
     # Relationships
     academy = relationship("Academy")
     student_digital_products = relationship("StudentDigitalProduct", back_populates="digital_product")
     ratings = relationship("DigitalProductRating", back_populates="digital_product")
-    cart_items = relationship("Cart", back_populates="digital_product")
 
 
 class StudentDigitalProduct(Base):

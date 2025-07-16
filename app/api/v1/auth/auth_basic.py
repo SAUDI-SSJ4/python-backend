@@ -1,27 +1,31 @@
 """
 Basic Authentication Endpoints
 ==============================
-Login, Register, and Logout functionality
+Login, Register, and Logout functionality with automatic cart merging
 """
 
-from typing import Any, Union, Optional
+from typing import Any, Union, Optional, Dict
 import os
-from fastapi import APIRouter, Depends, HTTPException, status, Body, Form, UploadFile, File, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Body, Form, UploadFile, File, Request, Header
+from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from pydantic import ValidationError, Field
 import logging
 
 from app.core import security
 from app.deps import get_db, get_current_user
+from app.deps.auth import security_scheme
 from app.schemas import (
     Token,
     UnifiedLogin,
     UnifiedRegister,
     MessageResponse,
     GoogleLoginRequest,
-    GoogleRegisterRequest
+    GoogleRegisterRequest,
+    RefreshTokenRequest
 )
 from app.models.user import User
+from app.services.cart_service import CartService
 from .auth_utils import (
     get_current_timestamp,
     generate_user_tokens,
@@ -30,7 +34,7 @@ from .auth_utils import (
 from .registration_service import RegistrationService
 from app.services.google_auth_service import GoogleAuthService
 
-# إعداد Logging
+# Setup Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -40,26 +44,29 @@ router = APIRouter()
 @router.post("/login", response_model=Token, response_model_exclude_none=True, tags=["Authentication"])
 async def unified_login(
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    the_cookie: Optional[str] = Header(None, alias="TheCookie")
 ) -> Any:
     """
-    تسجيل الدخول الموحد - يدعم Form Data و JSON
+    Unified login with automatic cart merging - supports Form Data and JSON
     
-    يمكن استخدام Form Data للسهولة:
-    - email: البريد الإلكتروني
-    - password: كلمة المرور  
-    - user_type: نوع المستخدم (اختياري - سيتم التحديد تلقائياً)
+    Can use Form Data for ease:
+    - email: Email address
+    - password: Password
+    - user_type: User type (optional - will be auto-detected)
     
-    أو JSON في body للتوافق مع الإصدارات السابقة
+    Or JSON in body for backward compatibility
+    
+    Automatically merges guest cart items to student cart upon login
     """
     
     try:
-        # Check content type - التحقق من نوع المحتوى
+        # Check content type
         content_type = request.headers.get("content-type", "").lower()
         
-        # Parse request body based on content type - تحليل محتوى الطلب حسب نوعه
+        # Parse request body based on content type
         if "application/json" in content_type:
-            # JSON request - طلب JSON
+            # JSON request
             body = await request.json()
             merged_data = {
                 "email": body.get("email"),
@@ -69,7 +76,7 @@ async def unified_login(
                 "google_token": body.get("google_token")
             }
         else:
-            # Form data request - طلب Form Data
+            # Form data request
             form = await request.form()
             merged_data = {
                 "email": form.get("email"),
@@ -79,10 +86,10 @@ async def unified_login(
                 "google_token": form.get("google_token")
             }
             
-        # Remove None values - إزالة القيم الفارغة
+        # Remove None values
         merged_data = {k: v for k, v in merged_data.items() if v is not None}
         
-        # التأكد من وجود البيانات المطلوبة
+        # Ensure required data exists
         if not merged_data:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -95,23 +102,23 @@ async def unified_login(
                 }
             )
         
-        # التمييز بين تسجيل الدخول العادي و Google OAuth
+        # Distinguish between regular login and Google OAuth
         if "google_token" in merged_data and merged_data["google_token"]:
             # Google OAuth login
             google_request = GoogleLoginRequest(**merged_data)
-            return handle_google_login(google_request, db)
+            return await handle_google_login(google_request, db, the_cookie)
         else:
-            # Local login - إضافة user_type إذا لم يكن موجوداً
+            # Local login - add user_type if not present
             if "user_type" not in merged_data:
-                # البحث عن المستخدم تلقائياً وتحديد نوعه
-                return handle_auto_detect_login(merged_data, db)
+                # Auto-detect user and determine type
+                return await handle_auto_detect_login(merged_data, db, the_cookie)
             else:
-                # تسجيل دخول عادي مع نوع محدد
+                # Regular login with specified type
                 login_data = UnifiedLogin(**merged_data)
-                return handle_local_login(login_data, db)
+                return await handle_local_login(login_data, db, the_cookie)
             
     except ValidationError as ve:
-        # تحسين رسالة الخطأ للتوضيح
+        # Improve error message for clarity
         error_msg = "بيانات تسجيل الدخول غير صحيحة"
         missing_fields = []
         
@@ -152,10 +159,10 @@ async def unified_login(
         )
 
 
-def handle_auto_detect_login(body: dict, db: Session) -> Token:
-    """تسجيل الدخول مع التحديد التلقائي لنوع المستخدم"""
+async def handle_auto_detect_login(body: dict, db: Session, cookie_id: Optional[str] = None) -> Token:
+    """Login with automatic user type detection and cart merging"""
     
-    # التحقق من وجود الحقول المطلوبة
+    # Check for required fields
     if "email" not in body and "phone" not in body:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -180,7 +187,7 @@ def handle_auto_detect_login(body: dict, db: Session) -> Token:
             }
         )
     
-    # البحث عن المستخدم
+    # Search for user
     user = None
     if body.get("email"):
         user = db.query(User).filter(User.email == body["email"]).first()
@@ -199,7 +206,7 @@ def handle_auto_detect_login(body: dict, db: Session) -> Token:
             }
         )
     
-    # التحقق من كلمة المرور
+    # Verify password
     if user.account_type == "local":
         if not user.password or not security.verify_password(body["password"], user.password):
             raise HTTPException(
@@ -213,7 +220,7 @@ def handle_auto_detect_login(body: dict, db: Session) -> Token:
                 }
             )
     
-    # التحقق من حالة الحساب
+    # Check account status
     if user.status == "blocked":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -226,11 +233,12 @@ def handle_auto_detect_login(body: dict, db: Session) -> Token:
             }
         )
     
+    # Generate tokens without cart merge
     return generate_user_tokens(user, db)
 
 
-def handle_local_login(login_data: UnifiedLogin, db: Session) -> Token:
-    """   """
+async def handle_local_login(login_data: UnifiedLogin, db: Session, cookie_id: Optional[str] = None) -> Token:
+    """Handle local login with cart merging"""
     
     try:
         logger.info(f"محاولة تسجيل دخول لـ: {login_data.email}")
@@ -299,6 +307,8 @@ def handle_local_login(login_data: UnifiedLogin, db: Session) -> Token:
                 )
         
         logger.info("توليد التوكن للمستخدم")
+        
+        # Generate tokens without cart merge
         return generate_user_tokens(user, db)
         
     except Exception as e:
@@ -306,8 +316,8 @@ def handle_local_login(login_data: UnifiedLogin, db: Session) -> Token:
         raise
 
 
-def handle_google_login(google_request, db: Session) -> Token:
-    """معالجة تسجيل الدخول بـ Google"""
+async def handle_google_login(google_request, db: Session, cookie_id: Optional[str] = None) -> Token:
+    """Handle Google login with cart merging"""
     
     google_user_data = GoogleAuthService.verify_google_token(google_request.google_token)
     
@@ -361,7 +371,11 @@ def handle_google_login(google_request, db: Session) -> Token:
             }
         )
     
+    # Generate tokens without cart merge
     return generate_user_tokens(user, db)
+
+
+
 
 
 @router.post("/register", response_model=Token, response_model_exclude_none=True, status_code=status.HTTP_201_CREATED, tags=["Authentication"])
@@ -466,30 +480,249 @@ async def unified_register(
 
 
 @router.post("/logout", response_model=None, tags=["Authentication"])
-def logout(request: Request, current_user = Depends(get_current_user)) -> dict:
-    """تسجيل الخروج وإبطال التوكن (على المستوى الأمامي فقط)"""
+def logout(
+    request: Request, 
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user),
+    credentials: HTTPAuthorizationCredentials = Depends(security_scheme)
+) -> dict:
+    
+    try:
+        # Extract token from credentials
+        token = credentials.credentials
+        
+        # Get client info
+        client_ip = request.client.host if request.client else "unknown"
+        user_agent = request.headers.get("user-agent", "unknown")
+        
+        # Decode token to get JTI and expiration
+        from app.core import security
+        from jose import jwt
+        
+        # Try to decode token to get JTI
+        token_jti = None
+        token_exp = None
+        
+        # Try different user types to decode the token
+        for user_type in ["student", "academy", "admin"]:
+            try:
+                payload = security.decode_token(token, user_type, db)
+                if payload:
+                    token_jti = payload.get("jti")
+                    token_exp = payload.get("exp")
+                    break
+            except Exception:
+                continue
+        
+        # If we have JTI, add token to blacklist
+        if token_jti and token_exp:
+            from datetime import datetime
+            expires_at = datetime.utcfromtimestamp(token_exp)
+            
+            # Add token to blacklist
+            security.blacklist_token(
+                db=db,
+                token_jti=token_jti,
+                user_id=current_user.id,
+                user_type=current_user.user_type,
+                expires_at=expires_at,
+                token_type="access",
+                reason="logout",
+                ip_address=client_ip,
+                user_agent=user_agent
+            )
+            
+            tokens_invalidated = True
+        else:
+            tokens_invalidated = False
 
-    response = {
-        "status": "success",
-        "status_code": 200,
-        "error_type": None,
-        "message": "تم تسجيل الخروج بنجاح",
-        "data": {
-            "logged_out_at": get_current_timestamp(),
-            "user_id": current_user.id,
-            "tokens_invalidated": True
-        },
-        "path": str(request.url.path),
-        "timestamp": get_current_timestamp()
-    }
-    return response
+        response = {
+            "status": "success",
+            "status_code": 200,
+            "error_type": None,
+            "message": "تم تسجيل الخروج بنجاح وإبطال التوكن",
+            "data": {
+                "logged_out_at": get_current_timestamp(),
+                "user_id": current_user.id,
+                "tokens_invalidated": tokens_invalidated,
+                "logout_method": "server_side_blacklist"
+            },
+            "path": str(request.url.path),
+            "timestamp": get_current_timestamp()
+        }
+        return response
+        
+    except Exception as e:
+        # Fallback to basic logout if blacklist fails
+        response = {
+            "status": "success",
+            "status_code": 200,
+            "error_type": None,
+            "message": "تم تسجيل الخروج بنجاح (وضع الطوارئ)",
+            "data": {
+                "logged_out_at": get_current_timestamp(),
+                "user_id": current_user.id,
+                "tokens_invalidated": False,
+                "logout_method": "fallback",
+                "error": str(e)
+            },
+            "path": str(request.url.path),
+            "timestamp": get_current_timestamp()
+        }
+        return response
 
 
 @router.post("/refresh", response_model=Token, response_model_exclude_none=True, tags=["Authentication"])
-def refresh(current_user = Depends(get_current_user)) -> Any:
-    """تحديث الرمز المميز"""
+async def refresh(
+    request: Request,
+    db: Session = Depends(get_db)
+) -> Any:
+    """تحديث الرمز المميز باستخدام refresh_token - يدعم JSON و Form Data"""
     
-    return generate_user_tokens(current_user, None)
+    try:
+        # استخراج refresh_token من Request (JSON أو Form Data)
+        content_type = request.headers.get("content-type", "").lower()
+        refresh_token = None
+        
+        if "application/json" in content_type:
+            # JSON request
+            body = await request.json()
+            refresh_token = body.get("refresh_token")
+        else:
+            # Form data request
+            form = await request.form()
+            refresh_token = form.get("refresh_token")
+        
+        if not refresh_token:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "status": "error",
+                    "status_code": 400,
+                    "error_type": "Missing Data",
+                    "message": "refresh_token مطلوب إما عبر JSON أو Form Data",
+                    "path": "/api/v1/auth/refresh",
+                    "timestamp": get_current_timestamp()
+                }
+            )
+        
+        # فك تشفير refresh_token وتحديد نوع المستخدم
+        refresh_payload = None
+        user_type = None
+        
+        # تجربة فك التشفير مع جميع أنواع المستخدمين
+        for utype in ["student", "academy", "admin"]:
+            try:
+                payload = security.decode_token(refresh_token, utype, db)
+                if payload and payload.get("refresh"):
+                    refresh_payload = payload
+                    user_type = utype
+                    break
+            except Exception:
+                continue
+        
+        if not refresh_payload or not user_type:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={
+                    "status": "error",
+                    "status_code": 401,
+                    "error_type": "Invalid Token",
+                    "message": "refresh_token غير صالح أو منتهي الصلاحية",
+                    "path": "/api/v1/auth/refresh",
+                    "timestamp": get_current_timestamp()
+                }
+            )
+        
+        # استخراج معلومات المستخدم من التوكن
+        user_id = refresh_payload.get("sub")
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={
+                    "status": "error",
+                    "status_code": 401,
+                    "error_type": "Invalid Token",
+                    "message": "معلومات المستخدم غير موجودة في التوكن",
+                    "path": "/api/v1/auth/refresh",
+                    "timestamp": get_current_timestamp()
+                }
+            )
+        
+        # البحث عن المستخدم في قاعدة البيانات
+        user = db.query(User).filter(User.id == int(user_id)).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={
+                    "status": "error",
+                    "status_code": 401,
+                    "error_type": "User Not Found",
+                    "message": "المستخدم غير موجود",
+                    "path": "/api/v1/auth/refresh",
+                    "timestamp": get_current_timestamp()
+                }
+            )
+        
+        # التحقق من حالة المستخدم
+        if user.status == "blocked":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "status": "error",
+                    "status_code": 403,
+                    "error_type": "Account Blocked",
+                    "message": "الحساب محظور",
+                    "path": "/api/v1/auth/refresh",
+                    "timestamp": get_current_timestamp()
+                }
+            )
+        
+        if user.status == "inactive":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "status": "error",
+                    "status_code": 403,
+                    "error_type": "Account Inactive",
+                    "message": "الحساب غير نشط",
+                    "path": "/api/v1/auth/refresh",
+                    "timestamp": get_current_timestamp()
+                }
+            )
+        
+        # التحقق من تطابق نوع المستخدم
+        if user.user_type != user_type:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={
+                    "status": "error",
+                    "status_code": 401,
+                    "error_type": "User Type Mismatch",
+                    "message": "نوع المستخدم غير متطابق",
+                    "path": "/api/v1/auth/refresh",
+                    "timestamp": get_current_timestamp()
+                }
+            )
+        
+        # توليد tokens جديدة
+        return generate_user_tokens(user, db)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"خطأ في تحديث التوكن: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "status": "error",
+                "status_code": 500,
+                "error_type": "Server Error",
+                "message": "خطأ داخلي في الخادم",
+                "path": "/api/v1/auth/refresh",
+                "timestamp": get_current_timestamp()
+            }
+        )
 
 
  

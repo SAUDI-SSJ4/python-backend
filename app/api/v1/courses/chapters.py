@@ -1,7 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Form, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 
 from app.deps.database import get_db
 from app.deps.auth import get_current_academy_user, get_current_student
@@ -13,14 +13,19 @@ from app.schemas.chapter import (
     ChapterCreate, ChapterUpdate, ChapterResponse, ChapterDetailResponse,
     ChapterListResponse, ChapterOrderUpdate, ChaptersBulkOrderUpdate
 )
+from app.core.response_utils import (
+    create_success_response, create_error_response, create_list_response,
+    success_json_response, error_json_response
+)
 
 router = APIRouter()
 
 
 # Academy endpoints (Chapter management) - Simplified URLs
-@router.get("/academy/courses/{course_id}/chapters", response_model=ChapterListResponse)
+@router.get("/academy/courses/{course_id}/chapters")
 async def get_course_chapters(
     course_id: str,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_academy_user)
 ):
@@ -36,9 +41,11 @@ async def get_course_chapters(
     ).first()
     
     if not course:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="الدورة غير موجودة"
+        return error_json_response(
+            message="الدورة غير موجودة",
+            status_code=404,
+            error_type="Not Found",
+            request=request
         )
     
     # Get chapters ordered by order_number
@@ -46,16 +53,29 @@ async def get_course_chapters(
         Chapter.course_id == course_id
     ).order_by(Chapter.order_number).all()
     
-    return ChapterListResponse(
-        chapters=chapters,
-        total=len(chapters)
+    # Convert chapters to response format
+    chapters_data = [ChapterResponse.from_orm(chapter) for chapter in chapters]
+    
+    return success_json_response(
+        data=create_list_response(
+            items=chapters_data,
+            total=len(chapters),
+            message="تم استرجاع الفصول بنجاح",
+            path=str(request.url.path)
+        )["data"],
+        message="تم استرجاع الفصول بنجاح",
+        request=request
     )
 
 
-@router.post("/academy/courses/{course_id}/chapters", response_model=ChapterResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/academy/courses/{course_id}/chapters")
 async def create_chapter(
     course_id: str,
-    chapter_data: ChapterCreate,
+    request: Request,
+    title: str = Form(..., min_length=3, max_length=200, description="عنوان الفصل"),
+    description: Optional[str] = Form(None, description="وصف الفصل"),
+    order_number: int = Form(0, ge=0, description="ترتيب الفصل داخل الكورس"),
+    is_published: bool = Form(True, description="هل الفصل منشور"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_academy_user)
 ):
@@ -63,6 +83,7 @@ async def create_chapter(
     Create a new chapter for the course.
     
     Automatically assigns order number if not provided.
+    Accepts form-data instead of JSON.
     """
     # Verify course ownership
     course = db.query(Course).filter(
@@ -71,47 +92,60 @@ async def create_chapter(
     ).first()
     
     if not course:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="الدورة غير موجودة"
+        return error_json_response(
+            message="الدورة غير موجودة",
+            status_code=404,
+            error_type="Not Found",
+            request=request
         )
     
     try:
         # Auto-assign order number if not provided
-        if chapter_data.order_number == 0:
+        if order_number == 0:
             last_chapter = db.query(Chapter).filter(
                 Chapter.course_id == course_id
             ).order_by(Chapter.order_number.desc()).first()
             
-            chapter_data.order_number = (last_chapter.order_number + 1) if last_chapter else 1
+            order_number = (last_chapter.order_number + 1) if last_chapter else 1
         
         # Create chapter
         chapter = Chapter(
             course_id=course_id,
-            title=chapter_data.title,
-            description=chapter_data.description,
-            order_number=chapter_data.order_number,
-            is_published=chapter_data.is_published
+            title=title,
+            description=description,
+            order_number=order_number,
+            is_published=is_published
         )
         
         db.add(chapter)
         db.commit()
         db.refresh(chapter)
         
-        return ChapterResponse.from_orm(chapter)
+        # Convert to response format
+        chapter_data = ChapterResponse.from_orm(chapter)
+        
+        return success_json_response(
+            data=chapter_data,
+            message="تم إنشاء الفصل بنجاح",
+            status_code=201,
+            request=request
+        )
         
     except Exception as e:
         db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"حدث خطأ أثناء إنشاء الفصل: {str(e)}"
+        return error_json_response(
+            message=f"حدث خطأ أثناء إنشاء الفصل: {str(e)}",
+            status_code=500,
+            error_type="Internal Server Error",
+            request=request
         )
 
 
 # Simplified chapter endpoints - Using only chapter_id
-@router.get("/chapters/{chapter_id}", response_model=ChapterDetailResponse)
+@router.get("/chapters/{chapter_id}")
 async def get_chapter_details(
     chapter_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_academy_user)
 ):
@@ -126,9 +160,11 @@ async def get_chapter_details(
     ).first()
     
     if not chapter:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="الفصل غير موجود"
+        return error_json_response(
+            message="الفصل غير موجود",
+            status_code=404,
+            error_type="Not Found",
+            request=request
         )
     
     # Verify course ownership through chapter
@@ -138,18 +174,28 @@ async def get_chapter_details(
     ).first()
     
     if not course:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="الدورة غير موجودة أو ليس لديك صلاحية"
+        return error_json_response(
+            message="الدورة غير موجودة أو ليس لديك صلاحية",
+            status_code=404,
+            error_type="Not Found",
+            request=request
         )
     
-    return ChapterDetailResponse.from_orm(chapter)
+    # Convert to response format
+    chapter_data = ChapterDetailResponse.from_orm(chapter)
+    
+    return success_json_response(
+        data=chapter_data,
+        message="تم استرجاع بيانات الفصل بنجاح",
+        request=request
+    )
 
 
-@router.put("/chapters/{chapter_id}", response_model=ChapterResponse)
+@router.put("/chapters/{chapter_id}")
 async def update_chapter(
     chapter_id: int,
     chapter_data: ChapterUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_academy_user)
 ):
@@ -164,9 +210,11 @@ async def update_chapter(
     ).first()
     
     if not chapter:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="الفصل غير موجود"
+        return error_json_response(
+            message="الفصل غير موجود",
+            status_code=404,
+            error_type="Not Found",
+            request=request
         )
     
     # Verify course ownership through chapter
@@ -176,9 +224,11 @@ async def update_chapter(
     ).first()
     
     if not course:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="الدورة غير موجودة أو ليس لديك صلاحية"
+        return error_json_response(
+            message="الدورة غير موجودة أو ليس لديك صلاحية",
+            status_code=404,
+            error_type="Not Found",
+            request=request
         )
     
     try:
@@ -191,13 +241,22 @@ async def update_chapter(
         db.commit()
         db.refresh(chapter)
         
-        return ChapterResponse.from_orm(chapter)
+        # Convert to response format
+        chapter_response = ChapterResponse.from_orm(chapter)
+        
+        return success_json_response(
+            data=chapter_response,
+            message="تم تحديث الفصل بنجاح",
+            request=request
+        )
         
     except Exception as e:
         db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"حدث خطأ أثناء تحديث الفصل: {str(e)}"
+        return error_json_response(
+            message=f"حدث خطأ أثناء تحديث الفصل: {str(e)}",
+            status_code=500,
+            error_type="Internal Server Error",
+            request=request
         )
 
 

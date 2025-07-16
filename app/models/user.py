@@ -50,7 +50,7 @@ class User(Base):
     avatar = Column(String(255), nullable=True)
     banner = Column(String(255), nullable=True)
     
-    # Referral system - تصحيح نوع البيانات ليتوافق مع قاعدة البيانات
+    # Referral system - corrected data type to match database
     refere_id = Column(BigInteger, ForeignKey("users.id"), nullable=True)
     
     # Timestamps
@@ -61,6 +61,11 @@ class User(Base):
     student_profile = relationship("Student", back_populates="user", uselist=False)
     academy_memberships = relationship("AcademyUser", back_populates="user")
     otps = relationship("OTP", back_populates="user")
+    
+    # AI Assistant relationships
+    ai_conversations = relationship("AIConversation", back_populates="user")
+    ai_performance_metrics = relationship("AIPerformanceMetric", back_populates="user")
+    ai_exam_templates = relationship("AIExamTemplate", back_populates="creator")
     
     # Self-referential relationship for referrals
     referrer = relationship("User", remote_side=[id], backref="referred_users")

@@ -340,7 +340,7 @@ def test_exam(db_session: Session, test_lesson: Lesson) -> Exam:
         question="What does HTML stand for?",
         answers=["HyperText Markup Language", "High Tech Modern Language", "Home Tool Markup Language"],
         correct_answer=["HyperText Markup Language"],
-        question_type=QuestionType.SINGLE,
+        question_type=QuestionType.TEXT,
         duration=600  # 10 minutes
     )
     

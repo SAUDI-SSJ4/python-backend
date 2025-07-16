@@ -4,8 +4,9 @@ from jose import jwt
 from passlib.context import CryptContext
 from fastapi.security import HTTPBearer
 from app.core.config import settings
+import uuid
 
-# محاولة تهيئة «bcrypt». إذا فشلت (مثلاً لعدم توافق libbcrypt) ننتقل إلى خوارزمية آمنة بديلة.
+# Try to initialize bcrypt. If it fails (e.g., due to libbcrypt incompatibility), fallback to secure alternative algorithm.
 try:
     pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 except Exception as e:  # pragma: no cover
@@ -46,7 +47,9 @@ def create_access_token(
     to_encode = {
         "exp": expire, 
         "sub": str(subject),
-        "type": user_type
+        "type": user_type,
+        "jti": str(uuid.uuid4()),  # JWT ID for blacklist support
+        "iat": datetime.utcnow()  # Issued at time
     }
     
     if additional_claims:
@@ -141,13 +144,60 @@ def get_secret_key_by_type(user_type: str) -> str:
         return settings.SECRET_KEY  # Default fallback
 
 
-def decode_token(token: str, user_type: str) -> Optional[dict]:
+def is_token_blacklisted(db, token_jti: str) -> bool:
+    """
+    Check if a token is blacklisted
+    
+    Args:
+        db: Database session
+        token_jti: JWT ID to check
+        
+    Returns:
+        True if token is blacklisted, False otherwise
+    """
+    try:
+        from app.models.blacklisted_token import BlacklistedToken
+        return BlacklistedToken.is_token_blacklisted(db, token_jti)
+    except ImportError:
+        return False
+
+
+def blacklist_token(db, token_jti: str, user_id: int, user_type: str, 
+                   expires_at: datetime, token_type: str = "access", 
+                   reason: str = "logout", ip_address: str = None, 
+                   user_agent: str = None):
+    """
+    Add a token to blacklist
+    
+    Args:
+        db: Database session
+        token_jti: JWT ID to blacklist
+        user_id: User ID who owns the token
+        user_type: Type of user
+        expires_at: Token expiration time
+        token_type: Token type (access/refresh)
+        reason: Reason for blacklisting
+        ip_address: IP address
+        user_agent: User agent
+    """
+    try:
+        from app.models.blacklisted_token import BlacklistedToken
+        return BlacklistedToken.blacklist_token(
+            db, token_jti, user_id, user_type, expires_at, 
+            token_type, reason, ip_address, user_agent
+        )
+    except ImportError:
+        return None
+
+
+def decode_token(token: str, user_type: str, db=None) -> Optional[dict]:
     """
     Decode and verify a JWT token.
     
     Args:
         token: JWT token to decode
         user_type: Expected user type
+        db: Database session (optional, for blacklist check)
         
     Returns:
         Decoded token payload or None if invalid
@@ -159,6 +209,11 @@ def decode_token(token: str, user_type: str) -> Optional[dict]:
         # Verify the token is for the correct user type
         if payload.get("type") != user_type:
             return None
+        
+        # Check if token is blacklisted (if db session is provided)
+        if db and payload.get("jti"):
+            if is_token_blacklisted(db, payload["jti"]):
+                return None
             
         return payload
     except jwt.JWTError:

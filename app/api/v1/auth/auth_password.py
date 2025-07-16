@@ -383,7 +383,7 @@ def forgot_password(
 
         return create_unified_success_response(
             data=resp_data,
-            message="إذا كان البريد الإلكتروني موجودًا، سيتم إرسال رابط إعادة تعيين كلمة المرور",
+            message="إذا كان البريد الإلكتروني مسجلاً لدينا سيتم إرسال رابط إعادة تعيين كلمة المرور",
             status_code=200,
             path="/api/v1/auth/password/forgot"
         )

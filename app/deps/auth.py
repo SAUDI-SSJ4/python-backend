@@ -74,7 +74,10 @@ async def get_current_user(
         
         user_id: int = int(payload.get("sub"))
         
-        user = db.query(User).filter(User.id == user_id).first()
+        user = db.query(User).options(
+            joinedload(User.student_profile),
+            joinedload(User.academy_memberships).joinedload(AcademyUser.academy)
+        ).filter(User.id == user_id).first()
             
         if user is None:
             raise HTTPException(
@@ -155,7 +158,12 @@ async def get_current_academy_user(
             }
         )
     
-    if not user.academy:
+    # Load user with academy relationships to avoid lazy loading issues
+    user_with_academy = db.query(User).options(
+        joinedload(User.academy_memberships).joinedload(AcademyUser.academy)
+    ).filter(User.id == user.id).first()
+    
+    if not user_with_academy or not user_with_academy.academy:
         from datetime import datetime
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -168,7 +176,7 @@ async def get_current_academy_user(
             }
         )
     
-    return user
+    return user_with_academy
 
 
 async def get_current_student(
@@ -176,13 +184,41 @@ async def get_current_student(
     db: Session = Depends(get_db)
 ) -> Student:
     """Get current student user."""
-    return await get_current_user(credentials, db)
+    user = await get_current_user(credentials, db)
+    
+    if user.user_type != "student":
+        from datetime import datetime
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "status": 403,
+                "error": "Forbidden",
+                "message": "هذا الحساب ليس حساب طالب",
+                "path": "/api/v1/student/",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        )
+    
+    if not user.student_profile:
+        from datetime import datetime
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "status": 404,
+                "error": "Not Found",
+                "message": "لم يتم العثور على ملف الطالب",
+                "path": "/api/v1/student/",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        )
+    
+    return user.student_profile
 
 
 async def get_optional_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(optional_security_scheme),
     db: Session = Depends(get_db)
-) -> Optional[dict]:
+) -> Optional[User]:
     """
     Get current user if token is provided, otherwise return None.
     Used for endpoints that work for both authenticated and guest users.

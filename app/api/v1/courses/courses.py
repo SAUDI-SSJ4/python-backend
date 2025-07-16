@@ -36,7 +36,11 @@ async def get_academy_courses(
     """
     try:
         # Build base query for academy's courses with product join
-        query = db.query(Course).join(Product).filter(Course.academy_id == current_user.academy.id)
+        query = db.query(Course).options(
+            joinedload(Course.category),
+            joinedload(Course.trainer),
+            joinedload(Course.product)
+        ).join(Product).filter(Course.academy_id == current_user.academy.id)
         
         # Apply filters
         if filters.category_id:
@@ -231,7 +235,11 @@ async def get_course_details(
     
     Returns comprehensive course data including chapters, lessons, and analytics.
     """
-    course = db.query(Course).filter(
+    course = db.query(Course).options(
+        joinedload(Course.category),
+        joinedload(Course.trainer),
+        joinedload(Course.product)
+    ).filter(
         Course.id == course_id,
         Course.academy_id == current_user.academy.id
     ).first()
@@ -258,7 +266,11 @@ async def update_course(
     Allows updating all course fields with proper validation and
     automatic recalculation of computed fields.
     """
-    course = db.query(Course).filter(
+    course = db.query(Course).options(
+        joinedload(Course.category),
+        joinedload(Course.trainer),
+        joinedload(Course.product)
+    ).filter(
         Course.id == course_id,
         Course.academy_id == current_user.academy.id
     ).first()
@@ -330,7 +342,11 @@ async def update_course_status(
     
     Allows quick status changes for course management.
     """
-    course = db.query(Course).filter(
+    course = db.query(Course).options(
+        joinedload(Course.category),
+        joinedload(Course.trainer),
+        joinedload(Course.product)
+    ).filter(
         Course.id == course_id,
         Course.academy_id == current_user.academy.id
     ).first()
@@ -381,7 +397,11 @@ async def delete_course(
     Permanently removes the course and all associated data.
     This action cannot be undone.
     """
-    course = db.query(Course).filter(
+    course = db.query(Course).options(
+        joinedload(Course.category),
+        joinedload(Course.trainer),
+        joinedload(Course.product)
+    ).filter(
         Course.id == course_id,
         Course.academy_id == current_user.academy.id
     ).first()
@@ -442,7 +462,11 @@ async def get_public_courses(
     """
     try:
         # Build base query for published courses only with product join
-        query = db.query(Course).join(Product).filter(Course.course_state == CourseStatus.PUBLISHED)
+        query = db.query(Course).options(
+            joinedload(Course.category),
+            joinedload(Course.trainer),
+            joinedload(Course.product)
+        ).join(Product).filter(Course.course_state == CourseStatus.PUBLISHED)
         
         # Apply filters (same as academy endpoint but only for published courses)
         if filters.category_id:
@@ -503,7 +527,11 @@ async def get_public_course_details(
     Returns course details available to the public including
     course outline, preview content, and enrollment information.
     """
-    course = db.query(Course).filter(
+    course = db.query(Course).options(
+        joinedload(Course.category),
+        joinedload(Course.trainer),
+        joinedload(Course.product)
+    ).filter(
         Course.id == course_id,
         Course.course_state == CourseStatus.PUBLISHED
     ).first()
