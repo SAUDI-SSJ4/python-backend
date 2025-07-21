@@ -11,6 +11,14 @@ class ToolType(str, enum.Enum):
     """Interactive tool types enumeration"""
     COLORED_CARD = "colored_card"    # Colored card with title, description, color, and image
     TIMELINE = "timeline"            # Timeline events with order
+    
+    @classmethod
+    def _missing_(cls, value):
+        """Handle case-insensitive lookup"""
+        for member in cls:
+            if member.value.lower() == value.lower():
+                return member
+        return None
 
 
 class InteractiveTool(Base):
@@ -30,7 +38,7 @@ class InteractiveTool(Base):
     # Tool information
     title = Column(String(200), nullable=False, index=True)
     description = Column(Text, nullable=False)
-    tool_type = Column(SQLEnum(ToolType), nullable=False, default=ToolType.COLORED_CARD)
+    tool_type = Column(String(50), nullable=False, default="colored_card")
     color = Column(String(10), nullable=False, default="#007bff")   # Color theme for the tool
     image = Column(String(255))  # Tool icon or preview image
     order_number = Column(SmallInteger, nullable=False, default=1)  # Display order within lesson
@@ -53,4 +61,14 @@ class InteractiveTool(Base):
     @property
     def tool_url(self) -> str:
         """Generate URL for accessing the interactive tool"""
-        return f"/api/v1/tools/{self.id}/interactive" 
+        return f"/api/v1/tools/{self.id}/interactive"
+    
+    def validate_tool_type(self):
+        """Validate tool_type value"""
+        valid_types = ["colored_card", "timeline"]
+        if self.tool_type not in valid_types:
+            raise ValueError(f"tool_type must be one of: {valid_types}")
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.validate_tool_type() 
