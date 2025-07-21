@@ -7,6 +7,7 @@ from enum import Enum
 from pydantic import BaseModel, Field
 
 from app.services.ai.rate_limit_handler import RateLimitHandler, RateLimitUnit
+from app.core.config import settings
 
 
 class AIProvider(str, Enum):
@@ -70,19 +71,19 @@ class AIConfigManager:
         """Load default AI service configurations with hourly rate limiting"""
         
         # Get rate limiting settings from environment
-        rate_limit_unit = os.getenv("OPENAI_RATE_LIMIT_UNIT", "hour")
-        rate_limit_value = int(os.getenv("OPENAI_RATE_LIMIT_PER_HOUR", "40"))
+        rate_limit_unit = getattr(settings, "OPENAI_RATE_LIMIT_UNIT", "hour")
+        rate_limit_value = getattr(settings, "OPENAI_RATE_LIMIT_PER_HOUR", 40)
         
         # Support legacy minute-based config
         if rate_limit_unit == "minute":
-            rate_limit_value = int(os.getenv("OPENAI_RATE_LIMIT", "40"))
+            rate_limit_value = getattr(settings, "OPENAI_RATE_LIMIT", 40)
         
         # OpenAI Configuration for transcription
-        if os.getenv("OPENAI_API_KEY"):
+        if settings.OPENAI_API_KEY:
             self._configs["transcription"] = AIServiceConfig(
                 provider=AIProvider.OPENAI,
                 service_type=AIServiceType.TRANSCRIPTION,
-                api_key=os.getenv("OPENAI_API_KEY"),
+                api_key=settings.OPENAI_API_KEY,
                 model_name="whisper-1",
                 max_tokens=0,  # Not applicable for transcription
                 temperature=0.0,
@@ -91,31 +92,31 @@ class AIConfigManager:
             )
         
         # OpenAI Configuration for chat completion
-        if os.getenv("OPENAI_API_KEY"):
+        if settings.OPENAI_API_KEY:
             self._configs["chat"] = AIServiceConfig(
                 provider=AIProvider.OPENAI,
                 service_type=AIServiceType.CHAT_COMPLETION,
-                api_key=os.getenv("OPENAI_API_KEY"),
-                model_name=os.getenv("OPENAI_MODEL", "gpt-4"),
-                max_tokens=int(os.getenv("OPENAI_MAX_TOKENS", "4000")),
-                temperature=float(os.getenv("OPENAI_TEMPERATURE", "0.7")),
+                api_key=settings.OPENAI_API_KEY,
+                model_name=settings.OPENAI_MODEL,
+                max_tokens=settings.OPENAI_MAX_TOKENS,
+                temperature=settings.OPENAI_TEMPERATURE,
                 rate_limit_value=rate_limit_value,
                 rate_limit_unit=RateLimitUnit(rate_limit_unit)
             )
         
         # Azure OpenAI Configuration (if available)
-        if os.getenv("AZURE_OPENAI_API_KEY"):
-            azure_rate_limit_unit = os.getenv("AZURE_OPENAI_RATE_LIMIT_UNIT", "hour")
-            azure_rate_limit_value = int(os.getenv("AZURE_OPENAI_RATE_LIMIT_PER_HOUR", "60"))
+        if getattr(settings, "AZURE_OPENAI_API_KEY", None):
+            azure_rate_limit_unit = getattr(settings, "AZURE_OPENAI_RATE_LIMIT_UNIT", "hour")
+            azure_rate_limit_value = getattr(settings, "AZURE_OPENAI_RATE_LIMIT_PER_HOUR", 60)
             
             self._configs["azure_chat"] = AIServiceConfig(
                 provider=AIProvider.AZURE_OPENAI,
                 service_type=AIServiceType.CHAT_COMPLETION,
-                api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-                api_base=os.getenv("AZURE_OPENAI_ENDPOINT"),
-                model_name=os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4"),
-                max_tokens=int(os.getenv("AZURE_OPENAI_MAX_TOKENS", "4000")),
-                temperature=float(os.getenv("AZURE_OPENAI_TEMPERATURE", "0.7")),
+                api_key=settings.AZURE_OPENAI_API_KEY,
+                api_base=getattr(settings, "AZURE_OPENAI_ENDPOINT", None),
+                model_name=getattr(settings, "AZURE_OPENAI_DEPLOYMENT", "gpt-4"),
+                max_tokens=getattr(settings, "AZURE_OPENAI_MAX_TOKENS", 4000),
+                temperature=getattr(settings, "AZURE_OPENAI_TEMPERATURE", 0.7),
                 rate_limit_value=azure_rate_limit_value,
                 rate_limit_unit=RateLimitUnit(azure_rate_limit_unit)
             )

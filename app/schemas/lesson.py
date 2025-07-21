@@ -228,4 +228,205 @@ class LessonFilters(BaseModel):
                 "status": True,
                 "search": "HTML"
             }
+        }
+
+
+# ========================================
+# TRANSCRIPTION SCHEMAS
+# ========================================
+
+class TranscriptionErrorDetails(BaseModel):
+    """Schema for transcription error details"""
+    processing_time_seconds: int = Field(0, description="Processing time in seconds")
+    file_size_bytes: int = Field(0, description="File size in bytes")
+    duration_seconds: int = Field(0, description="Video duration in seconds")
+    confidence_score: float = Field(0.0, description="Confidence score")
+    has_transcription_text: bool = Field(False, description="Whether transcription text exists")
+    transcription_text_length: int = Field(0, description="Length of transcription text")
+    has_segments: bool = Field(False, description="Whether segments exist")
+    segments_count: int = Field(0, description="Number of segments")
+    has_subtitles: bool = Field(False, description="Whether subtitles exist")
+    subtitles_length: int = Field(0, description="Length of subtitles")
+
+
+class TranscriptionSystemInfo(BaseModel):
+    """Schema for transcription system information"""
+    openai_api_key_configured: bool = Field(False, description="Whether OpenAI API key is configured")
+    openai_api_key_length: int = Field(0, description="Length of OpenAI API key")
+    ai_transcription_enabled: bool = Field(True, description="Whether AI transcription is enabled")
+    video_processing_service_available: bool = Field(False, description="Whether video processing service is available")
+
+
+class TranscriptionLessonInfo(BaseModel):
+    """Schema for transcription lesson information"""
+    lesson_id: str = Field(..., description="Lesson ID")
+    lesson_title: str = Field(..., description="Lesson title")
+    lesson_type: str = Field(..., description="Lesson type")
+    has_video: bool = Field(False, description="Whether lesson has video")
+    video_path: Optional[str] = Field(None, description="Video file path")
+    video_size_bytes: int = Field(0, description="Video file size in bytes")
+    video_duration: int = Field(0, description="Video duration in seconds")
+
+
+class TranscriptionCourseInfo(BaseModel):
+    """Schema for transcription course information"""
+    course_id: str = Field(..., description="Course ID")
+    course_title: str = Field(..., description="Course title")
+    academy_id: int = Field(..., description="Academy ID")
+
+
+class TranscriptionStatusResponse(BaseModel):
+    """Schema for transcription status response"""
+    transcription_id: str = Field(..., description="Transcription ID")
+    status: str = Field(..., description="Processing status")
+    has_transcription: bool = Field(False, description="Whether transcription is completed")
+    language: str = Field("ar", description="Language code")
+    created_at: Optional[str] = Field(None, description="Creation timestamp")
+    updated_at: Optional[str] = Field(None, description="Last update timestamp")
+    
+    # Completed transcription fields
+    transcription_text: Optional[str] = Field(None, description="Transcription text")
+    confidence_score: Optional[float] = Field(None, description="Confidence score")
+    duration_seconds: Optional[int] = Field(None, description="Video duration")
+    segments_count: Optional[int] = Field(None, description="Number of segments")
+    has_subtitles: Optional[bool] = Field(None, description="Whether subtitles exist")
+    
+    # Processing status fields
+    message: Optional[str] = Field(None, description="Status message")
+    estimated_completion: Optional[str] = Field(None, description="Estimated completion time")
+    
+    # Failed transcription fields
+    error: Optional[str] = Field(None, description="Error message")
+    error_details: Optional[TranscriptionErrorDetails] = Field(None, description="Detailed error information")
+    system_info: Optional[TranscriptionSystemInfo] = Field(None, description="System information")
+    lesson_info: Optional[TranscriptionLessonInfo] = Field(None, description="Lesson information")
+    course_info: Optional[TranscriptionCourseInfo] = Field(None, description="Course information")
+    troubleshooting_suggestions: Optional[List[str]] = Field(None, description="Troubleshooting suggestions")
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "transcription_id": "730a6f67-7d75-4ddb-997a-e491c71a0690",
+                "status": "FAILED",
+                "has_transcription": False,
+                "language": "ar",
+                "created_at": "2025-07-18T00:36:30",
+                "updated_at": "2025-07-18T00:36:30",
+                "message": "فشل في تحويل الفيديو إلى نص",
+                "error": "يرجى المحاولة مرة أخرى أو الاتصال بالدعم الفني",
+                "error_details": {
+                    "processing_time_seconds": 0,
+                    "file_size_bytes": 0,
+                    "duration_seconds": 0,
+                    "confidence_score": 0.0,
+                    "has_transcription_text": False,
+                    "transcription_text_length": 0,
+                    "has_segments": False,
+                    "segments_count": 0,
+                    "has_subtitles": False,
+                    "subtitles_length": 0
+                },
+                "system_info": {
+                    "openai_api_key_configured": True,
+                    "openai_api_key_length": 123,
+                    "ai_transcription_enabled": True,
+                    "video_processing_service_available": True
+                },
+                "lesson_info": {
+                    "lesson_id": "e9acf4aa-0464-4cc7-8a00-199d64edc5d2",
+                    "lesson_title": "استخدام المتحكمات",
+                    "lesson_type": "video",
+                    "has_video": True,
+                    "video_path": "lessons/video.mp4",
+                    "video_size_bytes": 15925248,
+                    "video_duration": 1800
+                },
+                "course_info": {
+                    "course_id": "8ad94e43-e8dd-4065-a276-4bdcbc151243",
+                    "course_title": "Laravel Course",
+                    "academy_id": 75
+                },
+                "troubleshooting_suggestions": [
+                    "تأكد من أن مفتاح OpenAI API صحيح ومفعل",
+                    "تحقق من وجود ملف الفيديو في المسار المحدد",
+                    "تأكد من أن حجم الفيديو لا يتجاوز الحد المسموح",
+                    "تحقق من صيغة الفيديو (MP4, MOV, AVI, etc.)",
+                    "تأكد من أن الفيديو يحتوي على صوت واضح",
+                    "جرب إعادة رفع الفيديو مرة أخرى"
+                ]
+            }
+        }
+
+
+class TranscriptionErrorDetailsResponse(BaseModel):
+    """Schema for detailed transcription error response"""
+    transcription_id: str = Field(..., description="Transcription ID")
+    lesson_id: str = Field(..., description="Lesson ID")
+    status: str = Field(..., description="Processing status")
+    created_at: Optional[str] = Field(None, description="Creation timestamp")
+    updated_at: Optional[str] = Field(None, description="Last update timestamp")
+    processing_time_seconds: int = Field(0, description="Processing time in seconds")
+    file_size_bytes: int = Field(0, description="File size in bytes")
+    duration_seconds: int = Field(0, description="Video duration in seconds")
+    language: str = Field("ar", description="Language code")
+    error_details: Dict[str, Any] = Field(default_factory=dict, description="Error details")
+    system_diagnostics: Dict[str, Any] = Field(default_factory=dict, description="System diagnostics")
+    file_diagnostics: Dict[str, Any] = Field(default_factory=dict, description="File diagnostics")
+    recommended_actions: List[str] = Field(default_factory=list, description="Recommended actions")
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "transcription_id": "730a6f67-7d75-4ddb-997a-e491c71a0690",
+                "lesson_id": "e9acf4aa-0464-4cc7-8a00-199d64edc5d2",
+                "status": "FAILED",
+                "created_at": "2025-07-18T00:36:30",
+                "updated_at": "2025-07-18T00:36:30",
+                "processing_time_seconds": 0,
+                "file_size_bytes": 0,
+                "duration_seconds": 0,
+                "language": "ar",
+                "error_details": {
+                    "error_message": "خدمة Whisper غير متاحة",
+                    "error_type": "Exception",
+                    "video_id": "video-uuid",
+                    "lesson_id": "lesson-uuid",
+                    "video_file_path": "lessons/video.mp4",
+                    "full_video_path": "static/uploads/lessons/video.mp4",
+                    "file_exists": True,
+                    "openai_api_key_configured": True,
+                    "ai_service_available": False,
+                    "video_processing_service_available": False
+                },
+                "system_diagnostics": {
+                    "openai_api_key_configured": True,
+                    "openai_api_key_length": 123,
+                    "ai_transcription_enabled": True,
+                    "video_processing_service_available": False,
+                    "ai_service_available": False
+                },
+                "file_diagnostics": {
+                    "video_path": "lessons/video.mp4",
+                    "full_video_path": "static/uploads/lessons/video.mp4",
+                    "file_exists": True,
+                    "file_size": 15925248,
+                    "video_duration": 1800
+                },
+                "recommended_actions": [
+                    "تحقق من مفتاح OpenAI API في ملف .env",
+                    "تأكد من وجود ملف الفيديو في المسار الصحيح",
+                    "تحقق من صحة ملف الفيديو وصيغته",
+                    "تأكد من أن الفيديو يحتوي على صوت واضح",
+                    "جرب إعادة رفع الفيديو",
+                    "تحقق من سجلات الخادم للحصول على مزيد من التفاصيل"
+                ]
+            }
         } 
+
+
+class TranscriptionModelMessage(BaseModel):
+    """رسالة النموذج المبسطة للتحويل"""
+    message: str = Field(..., description="رسالة النموذج")
+    status: str = Field(..., description="حالة التحويل")
+    error: Optional[str] = Field(None, description="رسالة الخطأ إذا فشل التحويل")
+    solution: Optional[str] = Field(None, description="الحل المقترح للمشكلة") 

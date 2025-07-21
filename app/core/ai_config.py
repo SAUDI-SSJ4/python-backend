@@ -65,11 +65,11 @@ class AIConfigManager:
         """Load default AI service configurations"""
         
         # OpenAI Configuration for transcription
-        if os.getenv("OPENAI_API_KEY"):
+        if settings.OPENAI_API_KEY:
             self._configs["transcription"] = AIServiceConfig(
                 provider=AIProvider.OPENAI,
                 service_type=AIServiceType.TRANSCRIPTION,
-                api_key=os.getenv("OPENAI_API_KEY"),
+                api_key=settings.OPENAI_API_KEY,
                 model_name="whisper-1",
                 max_tokens=0,  # Not applicable for transcription
                 temperature=0.0,
@@ -77,15 +77,15 @@ class AIConfigManager:
             )
         
         # OpenAI Configuration for chat completion
-        if os.getenv("OPENAI_API_KEY"):
+        if settings.OPENAI_API_KEY:
             self._configs["chat"] = AIServiceConfig(
                 provider=AIProvider.OPENAI,
                 service_type=AIServiceType.CHAT_COMPLETION,
-                api_key=os.getenv("OPENAI_API_KEY"),
-                model_name=os.getenv("OPENAI_MODEL", "gpt-4"),
-                max_tokens=int(os.getenv("OPENAI_MAX_TOKENS", "4000")),
-                temperature=float(os.getenv("OPENAI_TEMPERATURE", "0.7")),
-                rate_limit_per_minute=int(os.getenv("OPENAI_RATE_LIMIT", "40"))
+                api_key=settings.OPENAI_API_KEY,
+                model_name=settings.OPENAI_MODEL,
+                max_tokens=settings.OPENAI_MAX_TOKENS,
+                temperature=settings.OPENAI_TEMPERATURE,
+                rate_limit_per_minute=settings.OPENAI_RATE_LIMIT
             )
         
         # Azure OpenAI Configuration (if available)

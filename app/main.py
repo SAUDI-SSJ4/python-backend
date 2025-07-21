@@ -16,6 +16,7 @@ from datetime import datetime
 import logging
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
+from app.core.response_handler import SayanErrorResponse
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -239,7 +240,7 @@ except Exception as e:
     print(f"Failed to load AI Assistant router: {e}")
 
 try:
-    from app.api.v1.ai_test_only import router as ai_test_router
+    from app.api.v1.ai_test import router as ai_test_router
     ai_test_available = True
     print("Successfully loaded AI Test router")
 except Exception as e:
@@ -252,7 +253,7 @@ static_dir.mkdir(exist_ok=True)
 (static_dir / "uploads").mkdir(exist_ok=True)
 
 app = FastAPI(
-    title="نظام إدارة الكورسات الشامل - SAYAN API",
+    title="SAYAN AI Powered Learning Platform API",
     openapi_url="/api/v1/openapi.json",
     description="Complete Course Management System with Authentication, Video Streaming & Progress Tracking",
     version="2.0.0",
@@ -310,14 +311,12 @@ async def custom_http_exception_handler(request: Request, exc: HTTPException):
 # Add handler for 404 Not Found errors specifically
 @app.exception_handler(404)
 async def not_found_handler(request: Request, exc):
-    """Handle 404 Not Found errors with unified format"""
-    error_response = create_error_response(
-        message="المورد المطلوب غير موجود",
-        status_code=404,
-        error_type="Not Found",
-        path=str(request.url.path)
+    # Override default 404 response
+    return SayanErrorResponse(
+        message="الرابط المطلوب غير موجود",
+        error_type="NOT_FOUND_ERROR",
+        status_code=404
     )
-    return JSONResponse(status_code=404, content=error_response)
 
 
 # Add general exception handler for any other status codes

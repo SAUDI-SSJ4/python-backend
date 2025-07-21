@@ -703,14 +703,8 @@ async def publish_course(
     
     Quick endpoint to publish a course.
     """
-    course = db.query(Course).options(
-        joinedload(Course.category),
-        joinedload(Course.trainer),
-        joinedload(Course.product)
-    ).filter(
-        Course.id == course_id,
-        Course.academy_id == current_user.academy.id
-    ).first()
+    # First check if course exists at all
+    course = db.query(Course).filter(Course.id == course_id).first()
     
     if not course:
         return JSONResponse(
@@ -720,11 +714,44 @@ async def publish_course(
                 "status_code": 404,
                 "error_type": "Not Found",
                 "message": "الدورة غير موجودة",
-                "data": None,
+                "data": {
+                    "course_id": course_id,
+                    "debug_info": "Course not found in database"
+                },
                 "path": f"/api/v1/academy/courses/{course_id}/publish",
                 "timestamp": datetime.utcnow().isoformat()
             }
         )
+    
+    # Check if course belongs to current academy
+    if course.academy_id != current_user.academy.id:
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content={
+                "status": "error",
+                "status_code": 403,
+                "error_type": "Forbidden",
+                "message": "ليس لديك صلاحية للوصول لهذه الدورة",
+                "data": {
+                    "course_id": course_id,
+                    "course_academy_id": course.academy_id,
+                    "user_academy_id": current_user.academy.id,
+                    "debug_info": "Course belongs to different academy"
+                },
+                "path": f"/api/v1/academy/courses/{course_id}/publish",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        )
+    
+    # Load course with relationships
+    course = db.query(Course).options(
+        joinedload(Course.category),
+        joinedload(Course.trainer),
+        joinedload(Course.product)
+    ).filter(
+        Course.id == course_id,
+        Course.academy_id == current_user.academy.id
+    ).first()
     
     try:
         course.course_state = CourseStatus.published
@@ -779,14 +806,8 @@ async def unpublish_course(
     
     Quick endpoint to unpublish a course.
     """
-    course = db.query(Course).options(
-        joinedload(Course.category),
-        joinedload(Course.trainer),
-        joinedload(Course.product)
-    ).filter(
-        Course.id == course_id,
-        Course.academy_id == current_user.academy.id
-    ).first()
+    # First check if course exists at all
+    course = db.query(Course).filter(Course.id == course_id).first()
     
     if not course:
         return JSONResponse(
@@ -796,11 +817,44 @@ async def unpublish_course(
                 "status_code": 404,
                 "error_type": "Not Found",
                 "message": "الدورة غير موجودة",
-                "data": None,
+                "data": {
+                    "course_id": course_id,
+                    "debug_info": "Course not found in database"
+                },
                 "path": f"/api/v1/academy/courses/{course_id}/unpublish",
                 "timestamp": datetime.utcnow().isoformat()
             }
         )
+    
+    # Check if course belongs to current academy
+    if course.academy_id != current_user.academy.id:
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content={
+                "status": "error",
+                "status_code": 403,
+                "error_type": "Forbidden",
+                "message": "ليس لديك صلاحية للوصول لهذه الدورة",
+                "data": {
+                    "course_id": course_id,
+                    "course_academy_id": course.academy_id,
+                    "user_academy_id": current_user.academy.id,
+                    "debug_info": "Course belongs to different academy"
+                },
+                "path": f"/api/v1/academy/courses/{course_id}/unpublish",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        )
+    
+    # Load course with relationships
+    course = db.query(Course).options(
+        joinedload(Course.category),
+        joinedload(Course.trainer),
+        joinedload(Course.product)
+    ).filter(
+        Course.id == course_id,
+        Course.academy_id == current_user.academy.id
+    ).first()
     
     try:
         course.course_state = CourseStatus.draft

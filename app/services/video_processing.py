@@ -7,6 +7,7 @@ import logging
 from typing import Dict, Any, Optional
 from app.services.ai.openai_service import OpenAITranscriptionService
 from app.core.ai_config import AIServiceConfig
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,7 @@ class VideoProcessingService:
             config = AIServiceConfig(
                 service_type="transcription",
                 model_name="whisper-1",
-                api_key=os.getenv("OPENAI_API_KEY"),
+                api_key=settings.OPENAI_API_KEY,
                 provider="openai",
                 rate_limit_per_minute=40
             )
@@ -41,8 +42,11 @@ class VideoProcessingService:
         academy_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
-        تحويل الفيديو إلى نص باستخدام OpenAI Whisper مباشرة
+        تحويل الفيديو إلى نص باستخدام OpenAI Whisper مباشرة مع مراقبة التقدم
         """
+        import asyncio
+        import time
+        
         try:
             if not self.transcription_service:
                 raise Exception("خدمة Whisper غير متاحة")
@@ -53,17 +57,119 @@ class VideoProcessingService:
             
             # الحصول على حجم الملف للمعلومات فقط
             file_size = os.path.getsize(video_path)
-            logger.info(f"بدء تحويل الفيديو إلى نص باستخدام Whisper: {video_path} (حجم: {file_size / (1024*1024):.2f}MB)")
+            file_size_mb = file_size / (1024*1024)
             
-            # تحويل الفيديو إلى نص باستخدام Whisper (بدون حد للحجم)
-            with open(video_path, "rb") as video_file:
-                result = await self.transcription_service.transcribe_audio(
-                    audio_file=video_file,
-                    language=language,
-                    academy_id=academy_id
-                )
+            logger.info(f"بدء تحويل الفيديو إلى نص باستخدام Whisper: {video_path} (حجم: {file_size_mb:.2f}MB)")
             
-            if result.get("status") == "success":
+            # بدء مراقبة التقدم
+            start_time = time.time()
+            progress_task = asyncio.create_task(self._monitor_progress(start_time, file_size_mb))
+            
+            try:
+                # محاولة تحويل الفيديو إلى نص باستخدام Whisper مباشرة
+                try:
+                    with open(video_path, "rb") as video_file:
+                        result = await self.transcription_service.transcribe_audio(
+                            audio_file=video_file,
+                            language=language,
+                            academy_id=academy_id
+                        )
+                    logger.info("تم تحويل الفيديو بنجاح باستخدام Whisper المباشر")
+                except Exception as whisper_error:
+                    logger.warning(f"فشل Whisper المباشر: {whisper_error}")
+                    
+                    # إذا فشل، جرب استخراج الصوت
+                    audio_path = await self._extract_audio_from_video(video_path)
+                    
+                    if audio_path and os.path.exists(audio_path):
+                        try:
+                            with open(audio_path, "rb") as audio_file:
+                                result = await self.transcription_service.transcribe_audio(
+                                    audio_file=audio_file,
+                                    language=language,
+                                    academy_id=academy_id
+                                )
+                            # حذف ملف الصوت المؤقت
+                            os.unlink(audio_path)
+                            logger.info("تم تحويل الفيديو بنجاح بعد استخراج الصوت")
+                        except Exception as audio_error:
+                            raise Exception(f"فشل في تحويل الصوت المستخرج: {audio_error}")
+                    else:
+                        # إذا فشل استخراج الصوت، جرب إرسال الفيديو كما هو
+                        logger.info("محاولة إرسال الفيديو كما هو إلى Whisper...")
+                        with open(video_path, "rb") as video_file:
+                            result = await self.transcription_service.transcribe_audio(
+                                audio_file=video_file,
+                                language=language,
+                                academy_id=academy_id
+                            )
+                
+                # إيقاف مراقبة التقدم
+                progress_task.cancel()
+                
+                # خدمة OpenAI ترجع النتيجة مباشرة بدون status
+                if result and "text" in result:
+                    processing_time = time.time() - start_time
+                    logger.info(f"تم الانتهاء من التحويل في {processing_time:.2f} ثانية")
+                    
+                    return {
+                        "status": "success",
+                        "text": result.get("text", ""),
+                        "language": result.get("language", language),
+                        "duration": result.get("duration", 0),
+                        "segments": result.get("segments", []),
+                        "confidence": result.get("confidence", 0.0),
+                        "file_size_mb": round(file_size_mb, 2),
+                        "processing_time_seconds": round(processing_time, 2)
+                    }
+                else:
+                    raise Exception("فشل في تحويل الفيديو إلى نص - لم يتم الحصول على نص")
+                    
+            except Exception as e:
+                # إيقاف مراقبة التقدم في حالة الخطأ
+                progress_task.cancel()
+                raise e
+            
+            # محاولة تحويل الفيديو إلى نص باستخدام Whisper مباشرة
+            try:
+                with open(video_path, "rb") as video_file:
+                    result = await self.transcription_service.transcribe_audio(
+                        audio_file=video_file,
+                        language=language,
+                        academy_id=academy_id
+                    )
+                logger.info("تم تحويل الفيديو بنجاح باستخدام Whisper المباشر")
+            except Exception as whisper_error:
+                logger.warning(f"فشل Whisper المباشر: {whisper_error}")
+                
+                # إذا فشل، جرب استخراج الصوت
+                audio_path = await self._extract_audio_from_video(video_path)
+                
+                if audio_path and os.path.exists(audio_path):
+                    try:
+                        with open(audio_path, "rb") as audio_file:
+                            result = await self.transcription_service.transcribe_audio(
+                                audio_file=audio_file,
+                                language=language,
+                                academy_id=academy_id
+                            )
+                        # حذف ملف الصوت المؤقت
+                        os.unlink(audio_path)
+                        logger.info("تم تحويل الفيديو بنجاح بعد استخراج الصوت")
+                    except Exception as audio_error:
+                        raise Exception(f"فشل في تحويل الصوت المستخرج: {audio_error}")
+                else:
+                    # إذا فشل استخراج الصوت، جرب إرسال الفيديو كما هو
+                    logger.info("محاولة إرسال الفيديو كما هو إلى Whisper...")
+                    with open(video_path, "rb") as video_file:
+                        result = await self.transcription_service.transcribe_audio(
+                            audio_file=video_file,
+                            language=language,
+                            academy_id=academy_id
+                        )
+            
+            # خدمة OpenAI ترجع النتيجة مباشرة بدون status
+            if result and "text" in result:
                 return {
                     "status": "success",
                     "text": result.get("text", ""),
@@ -74,7 +180,7 @@ class VideoProcessingService:
                     "file_size_mb": round(file_size / (1024 * 1024), 2)
                 }
             else:
-                raise Exception(result.get("error", "فشل في تحويل الفيديو إلى نص"))
+                raise Exception("فشل في تحويل الفيديو إلى نص - لم يتم الحصول على نص")
             
         except Exception as e:
             logger.error(f"خطأ في تحويل الفيديو إلى نص: {e}")
@@ -154,6 +260,159 @@ class VideoProcessingService:
         
         return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
     
+    async def _extract_audio_from_video(self, video_path: str) -> Optional[str]:
+        """
+        استخراج الصوت من الفيديو باستخدام ffmpeg أو مكتبة Python
+        """
+        try:
+            import tempfile
+            import subprocess
+            
+            # محاولة استخدام ffmpeg أولاً
+            try:
+                # إنشاء ملف صوت مؤقت
+                temp_audio = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+                temp_audio_path = temp_audio.name
+                temp_audio.close()
+                
+                # استخدام ffmpeg لاستخراج الصوت
+                cmd = [
+                    "ffmpeg",
+                    "-i", video_path,
+                    "-vn",  # لا فيديو
+                    "-acodec", "pcm_s16le",  # كودك صوت WAV
+                    "-ar", "16000",  # معدل عينات 16kHz
+                    "-ac", "1",  # قناة صوت واحدة (mono)
+                    "-y",  # استبدال الملف إذا كان موجود
+                    temp_audio_path
+                ]
+                
+                logger.info(f"استخراج الصوت من الفيديو باستخدام ffmpeg: {' '.join(cmd)}")
+                
+                # تنفيذ الأمر
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=300  # 5 دقائق كحد أقصى
+                )
+                
+                if result.returncode == 0 and os.path.exists(temp_audio_path):
+                    logger.info(f"تم استخراج الصوت بنجاح باستخدام ffmpeg: {temp_audio_path}")
+                    return temp_audio_path
+                else:
+                    logger.warning(f"فشل ffmpeg: {result.stderr}")
+                    if os.path.exists(temp_audio_path):
+                        os.unlink(temp_audio_path)
+                        
+            except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.SubprocessError) as e:
+                logger.warning(f"ffmpeg غير متاح أو فشل: {e}")
+            
+            # محاولة استخدام مكتبة Python كبديل
+            try:
+                import ffmpeg
+                
+                logger.info("محاولة استخراج الصوت باستخدام ffmpeg-python...")
+                
+                # إنشاء ملف صوت مؤقت
+                temp_audio = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+                temp_audio_path = temp_audio.name
+                temp_audio.close()
+                
+                # استخراج الصوت باستخدام ffmpeg-python
+                stream = ffmpeg.input(video_path)
+                stream = ffmpeg.output(stream, temp_audio_path, acodec='pcm_s16le', ar=16000, ac=1)
+                ffmpeg.run(stream, overwrite_output=True, quiet=True)
+                
+                if os.path.exists(temp_audio_path):
+                    logger.info(f"تم استخراج الصوت بنجاح باستخدام ffmpeg-python: {temp_audio_path}")
+                    return temp_audio_path
+                else:
+                    logger.error("فشل في إنشاء ملف الصوت")
+                    
+            except ImportError:
+                logger.warning("ffmpeg-python غير مثبت")
+            except Exception as e:
+                logger.error(f"فشل ffmpeg-python: {e}")
+            
+            # محاولة استخدام pydub كبديل
+            try:
+                from pydub import AudioSegment
+                
+                logger.info("محاولة استخراج الصوت باستخدام pydub...")
+                
+                # إنشاء ملف صوت مؤقت
+                temp_audio = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+                temp_audio_path = temp_audio.name
+                temp_audio.close()
+                
+                # استخراج الصوت باستخدام pydub
+                audio = AudioSegment.from_file(video_path)
+                
+                if audio is not None and len(audio) > 0:
+                    # تحويل الصوت إلى WAV 16kHz mono
+                    audio = audio.set_frame_rate(16000).set_channels(1)
+                    audio.export(temp_audio_path, format="wav")
+                    
+                    if os.path.exists(temp_audio_path):
+                        logger.info(f"تم استخراج الصوت بنجاح باستخدام pydub: {temp_audio_path}")
+                        return temp_audio_path
+                else:
+                    logger.error("الفيديو لا يحتوي على مسار صوتي")
+                    
+            except ImportError:
+                logger.warning("pydub غير مثبت")
+            except Exception as e:
+                logger.error(f"فشل pydub: {e}")
+            
+            # إذا وصلنا هنا، فشلت جميع المحاولات
+            logger.error("فشلت جميع محاولات استخراج الصوت")
+            return None
+                
+        except Exception as e:
+            logger.error(f"خطأ في استخراج الصوت: {e}")
+            if 'temp_audio_path' in locals() and os.path.exists(temp_audio_path):
+                os.unlink(temp_audio_path)
+            return None
+    
+    async def _monitor_progress(self, start_time: float, file_size_mb: float):
+        """
+        مراقبة تقدم عملية التحويل وإرسال رسائل كل 30 ثانية
+        """
+        import asyncio
+        import time
+        
+        try:
+            interval = 30  # كل 30 ثانية
+            message_count = 0
+            
+            while True:
+                await asyncio.sleep(interval)
+                
+                elapsed_time = time.time() - start_time
+                message_count += 1
+                
+                # رسائل مختلفة حسب الوقت المنقضي
+                if elapsed_time < 60:
+                    message = f"🔄 جاري معالجة الفيديو... (الوقت المنقضي: {elapsed_time:.0f} ثانية)"
+                elif elapsed_time < 300:  # أقل من 5 دقائق
+                    message = f"⏳ استخراج الصوت من الفيديو... (الوقت المنقضي: {elapsed_time/60:.1f} دقيقة)"
+                elif elapsed_time < 600:  # أقل من 10 دقائق
+                    message = f"🎬 تحويل الصوت إلى نص... (الوقت المنقضي: {elapsed_time/60:.1f} دقيقة)"
+                else:
+                    message = f"📝 معالجة النص النهائي... (الوقت المنقضي: {elapsed_time/60:.1f} دقيقة)"
+                
+                # إضافة معلومات إضافية للفيديوهات الكبيرة
+                if file_size_mb > 100:
+                    message += f" | حجم الفيديو: {file_size_mb:.1f}MB"
+                
+                logger.info(f"📊 تقدم المعالجة #{message_count}: {message}")
+                
+        except asyncio.CancelledError:
+            logger.info("✅ تم إيقاف مراقبة التقدم - اكتملت المعالجة")
+        except Exception as e:
+            logger.error(f"خطأ في مراقبة التقدم: {e}")
+
     def get_whisper_capabilities(self) -> Dict[str, Any]:
         """
         معلومات عن قدرات OpenAI Whisper

@@ -187,6 +187,7 @@ class CourseResponse(BaseModel):
     
     # Properties that come from Product relationship
     title: str
+    description: Optional[str] = None
     price: Decimal
     discount_price: Optional[Decimal] = None
     discount_ends_at: Optional[datetime] = None
@@ -226,6 +227,7 @@ class CourseResponse(BaseModel):
         # Get product data
         product_data = {
             "title": course.product.title if getattr(course, 'product', None) and course.product else "",
+            "description": course.product.description if getattr(course, 'product', None) and course.product else None,
             "price": course.product.price if getattr(course, 'product', None) and course.product and course.product.price is not None else Decimal('0.00'),
             "discount_price": course.product.discount_price if getattr(course, 'product', None) and course.product else None,
             "discount_ends_at": course.product.discount_ends_at if getattr(course, 'product', None) and course.product else None
@@ -335,6 +337,10 @@ class CourseDetailResponse(CourseResponse):
         base_data = super().from_course_model(course)
         base_dict = base_data.dict()
         response_data = base_dict.copy()
+        
+        # Add product description if available
+        if hasattr(course, 'product') and course.product:
+            response_data['description'] = getattr(course.product, 'description', None)
         # Add category data if available
         if hasattr(course, 'category') and course.category:
             response_data['category'] = {

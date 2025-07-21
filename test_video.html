@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Video Player - Protected</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <style>
+        .video-container {
+            position: relative;
+            width: 100%;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        
+        .custom-controls {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .custom-controls button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            cursor: pointer;
+            border-radius: 3px;
+        }
+        
+        .custom-controls button:hover {
+            background: #0056b3;
+        }
+        
+        .progress-bar {
+            flex: 1;
+            height: 5px;
+            background: #444;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: #007bff;
+            border-radius: 3px;
+            width: 0%;
+        }
+        
+        .time-display {
+            color: white;
+            font-size: 12px;
+        }
+        
+        /* منع النقر بالزر الأيمن */
+        video {
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="video-container">
+        <video id="videoPlayer" width="100%" height="400" preload="metadata"></video>
+        <div class="custom-controls">
+            <button id="playPauseBtn">▶️</button>
+            <div class="progress-bar" id="progressBar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+            <div class="time-display" id="timeDisplay">0:00 / 0:00</div>
+            <button id="fullscreenBtn">⛶</button>
+        </div>
+    </div>
+    <div id="status"></div>
+
+    <script>
+        const videoId = '025d6a36-d89d-4de4-98e4-a7319a62004d';
+        const token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NTMwMTQwODUsInN1YiI6Ijg2IiwidHlwZSI6ImFjYWRlbXkiLCJqdGkiOiI2NTBjMDJhZi04ODMyLTQ4ZDItYmY4ZS1iMzcwMzE3ZmVmN2QiLCJpYXQiOjE3NTMwMTIyODUsImVtYWlsIjoiZjdiYTBlMGJlNUBlbWFpbHkucHJvIn0.CakFNNIN4d9KNieu8CxM6k1xOdnsnJth5JchDKZ4QKs';
+        
+        // منع النقر بالزر الأيمن
+        document.addEventListener('contextmenu', e => e.preventDefault());
+        
+        // منع اختيار النص
+        document.addEventListener('selectstart', e => e.preventDefault());
+        
+        // منع السحب
+        document.addEventListener('dragstart', e => e.preventDefault());
+        
+        // منع F12 و Developer Tools
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'F12' || (e.ctrlKey && e.shiftKey && e.key === 'I') || 
+                (e.ctrlKey && e.shiftKey && e.key === 'J') || (e.ctrlKey && e.key === 'U')) {
+                e.preventDefault();
+                return false;
+            }
+        });
+        
+        // منع حفظ الصفحة
+        document.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.key === 's') {
+                e.preventDefault();
+                return false;
+            }
+        });
+        
+        // منع فتح Developer Tools
+        let devtools = { open: false, orientation: null };
+        setInterval(() => {
+            const threshold = 160;
+            const widthThreshold = window.outerWidth - window.innerWidth > threshold;
+            const heightThreshold = window.outerHeight - window.innerHeight > threshold;
+            
+            if (widthThreshold || heightThreshold) {
+                if (!devtools.open) {
+                    devtools.open = true;
+                    document.body.innerHTML = '<h1>ممنوع فتح Developer Tools!</h1>';
+                }
+            } else {
+                devtools.open = false;
+            }
+        }, 500);
+        
+        async function loadVideo() {
+            try {
+                document.getElementById('status').textContent = 'جاري تحميل الفيديو...';
+                
+                const response = await fetch(`https://fast.sayan-server.com/api/v1/videos/watch-direct/${videoId}`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                const blob = await response.blob();
+                const videoUrl = URL.createObjectURL(blob);
+                
+                const video = document.getElementById('videoPlayer');
+                video.src = videoUrl;
+                
+                document.getElementById('status').textContent = 'تم تحميل الفيديو بنجاح';
+                
+                setupCustomControls();
+                
+            } catch (error) {
+                console.error('خطأ في تحميل الفيديو:', error);
+                document.getElementById('status').textContent = `خطأ: ${error.message}`;
+            }
+        }
+        
+        function setupCustomControls() {
+            const video = document.getElementById('videoPlayer');
+            const playPauseBtn = document.getElementById('playPauseBtn');
+            const progressBar = document.getElementById('progressBar');
+            const progressFill = document.getElementById('progressFill');
+            const timeDisplay = document.getElementById('timeDisplay');
+            const fullscreenBtn = document.getElementById('fullscreenBtn');
+            
+            // Play/Pause
+            playPauseBtn.addEventListener('click', () => {
+                if (video.paused) {
+                    video.play();
+                    playPauseBtn.textContent = '⏸️';
+                } else {
+                    video.pause();
+                    playPauseBtn.textContent = '▶️';
+                }
+            });
+            
+            // Progress bar
+            video.addEventListener('timeupdate', () => {
+                const progress = (video.currentTime / video.duration) * 100;
+                progressFill.style.width = progress + '%';
+                
+                const currentTime = formatTime(video.currentTime);
+                const duration = formatTime(video.duration);
+                timeDisplay.textContent = `${currentTime} / ${duration}`;
+            });
+            
+            // Click on progress bar
+            progressBar.addEventListener('click', (e) => {
+                const rect = progressBar.getBoundingClientRect();
+                const clickX = e.clientX - rect.left;
+                const percentage = clickX / rect.width;
+                video.currentTime = percentage * video.duration;
+            });
+            
+            // Fullscreen
+            fullscreenBtn.addEventListener('click', () => {
+                if (video.requestFullscreen) {
+                    video.requestFullscreen();
+                } else if (video.webkitRequestFullscreen) {
+                    video.webkitRequestFullscreen();
+                }
+            });
+            
+            // Keyboard shortcuts
+            document.addEventListener('keydown', (e) => {
+                switch(e.code) {
+                    case 'Space':
+                        e.preventDefault();
+                        playPauseBtn.click();
+                        break;
+                    case 'ArrowLeft':
+                        video.currentTime -= 10;
+                        break;
+                    case 'ArrowRight':
+                        video.currentTime += 10;
+                        break;
+                }
+            });
+        }
+        
+        function formatTime(seconds) {
+            if (isNaN(seconds)) return '0:00';
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${mins}:${secs.toString().padStart(2, '0')}`;
+        }
+        
+        loadVideo();
+    </script>
+</body>
+</html>

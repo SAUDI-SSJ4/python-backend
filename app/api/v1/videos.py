@@ -2,6 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request, Query, F
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import Optional, Any
+import sys
+import platform
 
 from app.deps.database import get_db
 from app.deps.auth import get_current_student, get_current_academy_user, get_current_user
@@ -12,6 +14,7 @@ from app.models.course import Course
 from app.models.user import User
 from app.models.student_course import StudentCourse
 from app.services.video_streaming import video_streaming_service
+from app.services.hls_streaming import hls_streaming_service
 from app.services.file_service import file_service
 from app.core.response_handler import SayanSuccessResponse, SayanErrorResponse
 
@@ -257,7 +260,7 @@ async def academy_stream_video(
         
         course = db.query(Course).filter(Course.id == lesson.course_id).first()
         if not course or course.academy_id != user.academy.id:
-        raise HTTPException(
+            raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="ليس لديك صلاحية للوصول لهذا الفيديو"
             )
@@ -424,8 +427,8 @@ async def get_video_url(
 
 @router.post("/upload")
 async def upload_video(
-    title: str = Form(..., description="Video title"),
-    description: Optional[str] = Form(None, description="Video description"),
+    title: Optional[str] = Form(None, description="Video title (optional)"),
+    description: Optional[str] = Form(None, description="Video description (optional)"),
     lesson_id: Optional[str] = Form(None, description="Lesson ID"),
     video_file: UploadFile = File(..., description="Video file"),
     db: Session = Depends(get_db),
@@ -546,6 +549,323 @@ async def get_video_info(
         return SayanErrorResponse(
             message="حدث خطأ أثناء استرجاع معلومات الفيديو",
             error_type="INTERNAL_ERROR",
+            status_code=500
+        ) 
+
+
+@router.get("/hls/create/{video_id}")
+async def create_hls_stream(
+    video_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """
+    Create encrypted HLS stream for video with AES-128 encryption
+    """
+    try:
+        # Verify user access to video
+        video = video_streaming_service.verify_video_access(db, video_id, current_user.id)
+        
+        # Get video file path
+        file_path = video_streaming_service.get_video_file_path(video)
+        
+        # Create encrypted HLS playlist
+        hls_data = hls_streaming_service.create_encrypted_hls_playlist(
+            str(file_path),
+            video_id,
+            current_user.id,
+            request
+        )
+        
+        # Log access
+        video_streaming_service.log_video_access(db, video_id, current_user.id, request)
+        
+        return SayanSuccessResponse(
+            data={
+                "master_playlist_url": f"/api/v1/videos/hls/master/{video_id}/{hls_data['session_id']}",
+                "session_id": hls_data["session_id"],
+                "key_id": hls_data["key_id"],
+                "qualities": list(hls_data["qualities"].keys()),
+                "video_info": {
+                    "title": video.title,
+                    "description": video.description,
+                    "duration": video.duration
+                },
+                "security": {
+                    "encrypted": True,
+                    "encryption_type": "AES-128",
+                    "key_expiry_hours": 24,
+                    "session_bound": True
+                }
+            },
+            message="تم إنشاء تيار HLS المشفر بنجاح"
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        return SayanErrorResponse(
+            message="فشل في إنشاء تيار HLS",
+            error_type="HLS_CREATION_ERROR",
+            status_code=500
+        )
+
+
+@router.get("/hls/master/{video_id}/{session_id}")
+async def serve_hls_master_playlist(
+    video_id: str,
+    session_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """
+    Serve HLS master playlist with security verification
+    """
+    try:
+        # Verify user access to video
+        video = video_streaming_service.verify_video_access(db, video_id, current_user.id)
+        
+        # Construct master playlist path
+        master_playlist_path = f"temp_hls/{session_id}/master.m3u8"
+        
+        # Serve master playlist
+        return hls_streaming_service.serve_hls_playlist(
+            master_playlist_path,
+            request,
+            video_id,
+            current_user.id
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="حدث خطأ أثناء تقديم قائمة التشغيل الرئيسية"
+        )
+
+
+@router.get("/hls/playlist/{video_id}/{session_id}/{quality}")
+async def serve_hls_quality_playlist(
+    video_id: str,
+    session_id: str,
+    quality: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """
+    Serve HLS quality playlist with security verification
+    """
+    try:
+        # Verify user access to video
+        video = video_streaming_service.verify_video_access(db, video_id, current_user.id)
+        
+        # Validate quality
+        valid_qualities = ["240p", "360p", "480p", "720p", "1080p"]
+        if quality not in valid_qualities:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="جودة الفيديو غير صحيحة"
+            )
+        
+        # Construct playlist path
+        playlist_path = f"temp_hls/{session_id}/{quality}/playlist.m3u8"
+        
+        # Serve quality playlist
+        return hls_streaming_service.serve_hls_playlist(
+            playlist_path,
+            request,
+            video_id,
+            current_user.id
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="حدث خطأ أثناء تقديم قائمة التشغيل"
+        )
+
+
+@router.get("/hls/segment/{video_id}/{session_id}/{quality}/{segment_name}")
+async def serve_hls_segment(
+    video_id: str,
+    session_id: str,
+    quality: str,
+    segment_name: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """
+    Serve HLS segment with security verification
+    """
+    try:
+        # Verify user access to video
+        video = video_streaming_service.verify_video_access(db, video_id, current_user.id)
+        
+        # Validate quality
+        valid_qualities = ["240p", "360p", "480p", "720p", "1080p"]
+        if quality not in valid_qualities:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="جودة الفيديو غير صحيحة"
+            )
+        
+        # Construct segment path
+        segment_path = f"temp_hls/{session_id}/{quality}/{segment_name}"
+        
+        # Serve segment
+        return hls_streaming_service.serve_hls_segment(
+            segment_path,
+            request,
+            video_id,
+            current_user.id
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="حدث خطأ أثناء تقديم مقطع الفيديو"
+        )
+
+
+@router.get("/hls/key/{key_id}")
+async def serve_encryption_key(
+    key_id: str,
+    video_id: str = Query(..., description="Video ID"),
+    request: Request = None,
+    current_user = Depends(get_current_user)
+):
+    """
+    Serve encryption key for HLS segments
+    """
+    try:
+        # Serve encryption key
+        return hls_streaming_service.serve_encryption_key(
+            key_id,
+            request,
+            video_id,
+            current_user.id
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="حدث خطأ أثناء تقديم مفتاح التشفير"
+        )
+
+
+@router.delete("/hls/cleanup/{session_id}")
+async def cleanup_hls_session(
+    session_id: str,
+    request: Request,
+    current_user = Depends(get_current_user)
+):
+    """
+    Clean up HLS session files
+    """
+    try:
+        # Clean up session files
+        hls_streaming_service.cleanup_session_files(session_id)
+        
+        return SayanSuccessResponse(
+            data={"session_id": session_id},
+            message="تم تنظيف ملفات الجلسة بنجاح"
+        )
+        
+    except Exception as e:
+        return SayanErrorResponse(
+            message="فشل في تنظيف ملفات الجلسة",
+            error_type="CLEANUP_ERROR",
+            status_code=500
+        ) 
+
+
+@router.get("/hls/test")
+async def test_hls_system(
+    request: Request,
+    current_user = Depends(get_current_user)
+):
+    """
+    Test HLS system configuration and capabilities
+    """
+    try:
+        from app.core.hls_config import validate_hls_setup, get_hls_config, get_security_config
+        from app.core.ffmpeg_config import FFmpegConfig
+        
+        # Validate system setup
+        setup_status = validate_hls_setup()
+        
+        # Get configurations
+        hls_config = get_hls_config()
+        security_config = get_security_config()
+        
+        # Test FFmpeg
+        ffmpeg_version = "Unknown"
+        ffmpeg_hls_support = False
+        
+        try:
+            ffmpeg_path = FFmpegConfig.get_ffmpeg_path()
+            ffmpeg_version = FFmpegConfig.get_ffmpeg_version()
+            ffmpeg_hls_support = FFmpegConfig.verify_ffmpeg_installation()
+        except Exception as e:
+            ffmpeg_error = str(e)
+        
+        # System information
+        system_info = {
+            "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+            "platform": platform.system(),
+            "architecture": platform.machine(),
+            "current_user": current_user.id,
+            "user_type": getattr(current_user, 'user_type', 'unknown')
+        }
+        
+        return SayanSuccessResponse(
+            data={
+                "system_info": system_info,
+                "setup_status": setup_status,
+                "ffmpeg": {
+                    "version": ffmpeg_version,
+                    "hls_support": ffmpeg_hls_support,
+                    "path": ffmpeg_path if 'ffmpeg_path' in locals() else "Not found"
+                },
+                "hls_config": {
+                    "segment_duration": hls_config.segment_duration,
+                    "quality_levels": len(hls_config.quality_levels),
+                    "encryption_method": hls_config.encryption_method,
+                    "key_expiry_hours": hls_config.key_expiry_hours
+                },
+                "security_config": {
+                    "blocked_user_agents_count": len(security_config.blocked_user_agents),
+                    "allowed_dev_agents_count": len(security_config.allowed_dev_agents),
+                    "session_timeout_seconds": security_config.session_timeout_seconds,
+                    "rate_limit_per_ip": security_config.rate_limit_per_ip
+                },
+                "endpoints": {
+                    "create_hls": "/api/v1/videos/hls/create/{video_id}",
+                    "master_playlist": "/api/v1/videos/hls/master/{video_id}/{session_id}",
+                    "quality_playlist": "/api/v1/videos/hls/playlist/{video_id}/{session_id}/{quality}",
+                    "segment": "/api/v1/videos/hls/segment/{video_id}/{session_id}/{quality}/{segment_name}",
+                    "encryption_key": "/api/v1/videos/hls/key/{key_id}",
+                    "cleanup": "/api/v1/videos/hls/cleanup/{session_id}"
+                }
+            },
+            message="تم اختبار نظام HLS بنجاح"
+        )
+        
+    except Exception as e:
+        return SayanErrorResponse(
+            message=f"فشل في اختبار نظام HLS: {str(e)}",
+            error_type="HLS_TEST_ERROR",
             status_code=500
         ) 
 

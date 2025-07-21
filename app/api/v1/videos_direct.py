@@ -164,14 +164,39 @@ async def watch_video_direct(
         upload_dir = Path("static/uploads/lessons")
         video_file = None
         
-        # Search for file with video_id in filename
-        if upload_dir.exists():
+        # First, try to get video info from database to find the correct file path
+        try:
+            from app.models.video import Video
+            from app.deps.database import get_db
+            
+            db = next(get_db())
+            video_record = db.query(Video).filter(Video.id == video_id).first()
+            
+            if video_record and video_record.video:
+                # Try to find file using the stored video path
+                possible_paths = [
+                    upload_dir / video_record.video,
+                    Path(video_record.video),
+                    upload_dir / video_record.video.split('/')[-1] if '/' in video_record.video else None
+                ]
+                
+                for path in possible_paths:
+                    if path and path.exists():
+                        video_file = path
+                        break
+                
+                db.close()
+        except Exception as e:
+            print(f"Database lookup failed: {e}")
+        
+        # If not found by database lookup, search for file with video_id in filename
+        if not video_file and upload_dir.exists():
             for file_path in upload_dir.glob("*.mp4"):
                 if video_id in file_path.name:
                     video_file = file_path
                     break
         
-        # If not found by ID, try exact filename match
+        # If still not found, try exact filename match
         if not video_file:
             possible_names = [
                 f"{video_id}.mp4",
