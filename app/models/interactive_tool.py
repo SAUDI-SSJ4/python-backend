@@ -1,17 +1,25 @@
-from sqlalchemy import Column, String, Text, Integer, DateTime, ForeignKey, SmallInteger
+from sqlalchemy import Column, String, Text, Integer, DateTime, ForeignKey, SmallInteger, Enum as SQLEnum
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.mysql import CHAR
 from sqlalchemy.sql import func
 from app.db.base import Base
 import uuid
+import enum
+
+
+class ToolType(str, enum.Enum):
+    """Interactive tool types enumeration"""
+    COLORED_CARD = "colored_card"    # Colored card with title, description, color, and image
+    TIMELINE = "timeline"            # Timeline events with order
 
 
 class InteractiveTool(Base):
     """
-    Interactive tool model for educational tools and widgets within lessons.
+    Interactive tool model for educational tools within lessons.
     
-    These tools provide interactive learning experiences such as calculators,
-    simulations, diagrams, or other educational utilities.
+    Supports two types of interactive tools:
+    - Colored cards: Display information with title, description, color, and image
+    - Timeline: Display chronological events with order
     """
     __tablename__ = "interactive_tools"
 
@@ -22,13 +30,10 @@ class InteractiveTool(Base):
     # Tool information
     title = Column(String(200), nullable=False, index=True)
     description = Column(Text, nullable=False)
-    tool_type = Column(String(50), nullable=False, default="interactive")  # Type of tool
-    url = Column(String(500))  # External URL for the tool
-    content = Column(Text)  # Tool content (HTML, JSON, etc.)
-    settings = Column(Text)  # Tool settings (JSON)
+    tool_type = Column(SQLEnum(ToolType), nullable=False, default=ToolType.COLORED_CARD)
+    color = Column(String(10), nullable=False, default="#007bff")   # Color theme for the tool
     image = Column(String(255))  # Tool icon or preview image
-    color = Column(String(10))   # Color theme for the tool
-    order_number = Column(SmallInteger)  # Display order within lesson
+    order_number = Column(SmallInteger, nullable=False, default=1)  # Display order within lesson
     
     # Timestamps
     created_at = Column(DateTime, default=func.now(), nullable=False)
@@ -38,7 +43,7 @@ class InteractiveTool(Base):
     lesson = relationship("Lesson", back_populates="interactive_tools")
 
     def __repr__(self):
-        return f"<InteractiveTool(id={self.id}, title='{self.title}', lesson_id='{self.lesson_id}')>"
+        return f"<InteractiveTool(id={self.id}, title='{self.title}', tool_type='{self.tool_type}')>"
     
     @property
     def display_color(self) -> str:

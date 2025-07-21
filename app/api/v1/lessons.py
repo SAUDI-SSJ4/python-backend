@@ -1574,10 +1574,9 @@ async def add_interactive_tool(
             lesson_id=lesson_id,
             title=tool_data.get("title"),
             description=tool_data.get("description"),
-            tool_type=tool_data.get("tool_type"),
-            url=tool_data.get("url"),
-            content=tool_data.get("content"),
-            settings=tool_data.get("settings"),
+            tool_type=tool_data.get("tool_type", "colored_card"),
+            color=tool_data.get("color", "#007bff"),
+            image=tool_data.get("image"),
             order_number=tool_data.get("order_number", 1)
         )
         
@@ -1596,7 +1595,8 @@ async def add_interactive_tool(
                     "title": tool.title,
                     "description": tool.description,
                     "tool_type": tool.tool_type,
-                    "url": tool.url,
+                    "color": tool.color,
+                    "image": tool.image,
                     "order_number": tool.order_number,
                     "created_at": tool.created_at.isoformat()
                 }
@@ -1878,9 +1878,8 @@ async def get_lesson_tools(
                         "title": tool.title,
                         "description": tool.description,
                         "tool_type": tool.tool_type,
-                        "url": tool.url,
-                        "content": tool.content,
-                        "settings": tool.settings,
+                        "color": tool.color,
+                        "image": tool.image,
                         "order_number": tool.order_number,
                         "created_at": tool.created_at.isoformat()
                     }

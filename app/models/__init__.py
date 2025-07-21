@@ -19,7 +19,7 @@ from .payment import (
     CouponUsage, PaymentStatus, PaymentGateway
 )
 from .exam import Exam, Question, QuestionOption, QuestionType
-from .interactive_tool import InteractiveTool
+from .interactive_tool import InteractiveTool, ToolType
 from .lesson_progress import LessonProgress
 from .student_course import StudentCourse
 
@@ -54,7 +54,7 @@ __all__ = [
     "Video", "Cart", "CartSession",
     "Invoice", "InvoiceProduct", "Payment", "PaymentGatewayLog", "CouponUsage", "PaymentStatus", "PaymentGateway",
     "Exam", "Question", "QuestionOption", "QuestionType",
-    "InteractiveTool", "LessonProgress", "StudentCourse",
+    "InteractiveTool", "ToolType", "LessonProgress", "StudentCourse",
     
     # AI Assistant models
     "AIAnswer", "VideoTranscription", "ExamCorrection", "QuestionCorrection",
