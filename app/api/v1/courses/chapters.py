@@ -137,8 +137,7 @@ async def get_course_chapters(
             elif lesson.type == "tool":
                 # Get tools count separately
                 tools_count = db.query(InteractiveTool).filter(
-                    InteractiveTool.lesson_id == lesson.id,
-                    InteractiveTool.status == True
+                    InteractiveTool.lesson_id == lesson.id
                 ).count()
                 
                 lesson_info.update({
@@ -379,8 +378,7 @@ async def get_chapter_details(
         elif lesson.type == "tool":
             # Get tools count separately
             tools_count = db.query(InteractiveTool).filter(
-                InteractiveTool.lesson_id == lesson.id,
-                InteractiveTool.status == True
+                InteractiveTool.lesson_id == lesson.id
             ).count()
             
             lesson_info.update({
