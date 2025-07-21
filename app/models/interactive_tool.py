@@ -22,6 +22,10 @@ class InteractiveTool(Base):
     # Tool information
     title = Column(String(200), nullable=False, index=True)
     description = Column(Text, nullable=False)
+    tool_type = Column(String(50), nullable=False, default="interactive")  # Type of tool
+    url = Column(String(500))  # External URL for the tool
+    content = Column(Text)  # Tool content (HTML, JSON, etc.)
+    settings = Column(Text)  # Tool settings (JSON)
     image = Column(String(255))  # Tool icon or preview image
     color = Column(String(10))   # Color theme for the tool
     order_number = Column(SmallInteger)  # Display order within lesson

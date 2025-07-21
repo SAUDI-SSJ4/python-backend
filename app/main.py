@@ -52,6 +52,26 @@ class VideoProtectionMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
         return response
 
+
+class CORSLoggingMiddleware(BaseHTTPMiddleware):
+    """
+    Middleware to log CORS-related requests for debugging
+    """
+    
+    async def dispatch(self, request: Request, call_next):
+        # Log CORS preflight requests
+        if request.method == "OPTIONS":
+            logger.info(f"🔧 CORS Preflight request from: {request.headers.get('origin', 'Unknown')}")
+            logger.info(f"🔧 Request headers: {dict(request.headers)}")
+        
+        response = await call_next(request)
+        
+        # Log CORS response headers
+        if "Access-Control-Allow-Origin" in response.headers:
+            logger.info(f"🔧 CORS Response - Origin: {response.headers.get('Access-Control-Allow-Origin')}")
+        
+        return response
+
 from app.models import (
     User, UserType, UserStatus, AccountType, Student, Gender, Academy, AcademyUser, AcademyStatus, AcademyUserRole,
     OTP, OTPPurpose, AcademyFinance, StudentFinance, Transaction, Admin, Coupon, Course, CourseStatus, CourseType,
@@ -261,17 +281,52 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# Add video protection middleware before mounting static files
+# Add middlewares
+app.add_middleware(CORSLoggingMiddleware)
 app.add_middleware(VideoProtectionMiddleware)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+# Get CORS origins from settings
+from app.core.config import settings
+
+# Convert CORS origins to list of strings
+cors_origins = []
+if settings.BACKEND_CORS_ORIGINS:
+    for origin in settings.BACKEND_CORS_ORIGINS:
+        if isinstance(origin, str):
+            cors_origins.append(origin)
+        else:
+            cors_origins.append(str(origin))
+
+# Add default origins for development
+if settings.DEBUG:
+    cors_origins.extend([
+        "http://localhost:3000",
+        "http://localhost:3001", 
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:8000",
+        "http://127.0.0.1:8001",
+        "http://127.0.0.1:3001",
+        "https://sayan.website",
+        "https://sayan.pro",
+        "https://fast.sayan-server.com"
+    ])
+
+# Log CORS origins for debugging
+print(f"🔧 CORS Origins configured: {cors_origins}")
+
+# Remove duplicates while preserving order
+cors_origins = list(dict.fromkeys(cors_origins))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://sayan.website", "https://sayan.pro", "http://localhost:3000", "https://fast.sayan-server.com"],
+    allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=86400,  # Cache preflight requests for 24 hours
 )
 
 @app.exception_handler(HTTPException)
@@ -598,6 +653,7 @@ def health_check():
             "ai_summarization": "Available"
         }
     }
+
 
 @app.on_event("startup")
 def on_startup():
