@@ -460,7 +460,7 @@ async def unified_register(
         import traceback
         error_details = {
             "error": "registration_failed",
-            "message": "فشل في التسجيل، يرجى المحاولة مرة أخرى",
+            "message": f"فشل في التسجيل: {str(e)}",
             "status_code": 500,
             "details": str(e),
             "exception_type": type(e).__name__,

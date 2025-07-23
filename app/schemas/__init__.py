@@ -66,6 +66,21 @@ from .auth import *
 # Product schemas
 from .product import *
 
+# Template schemas
+from .template import Template, TemplateCreate, TemplateUpdate
+from .faq import Faq, FaqCreate, FaqUpdate
+from .opinion import Opinion, OpinionCreate, OpinionUpdate
+from .about import About, AboutCreate, AboutUpdate
+from .slider import Slider, SliderCreate, SliderUpdate
+from .settings import Settings, SettingsCreate, SettingsUpdate
+
+# Academy profile schemas
+from .academy_profile import (
+    AcademyBasicInfo, TemplateInfo, AboutInfo, SocialLinks, SettingsInfo,
+    MembershipInfo, ContentStatistics, SliderInfo, FaqInfo, OpinionInfo,
+    AcademyProfileResponse, AcademyProfileSummaryResponse, PublicAcademyProfileResponse
+)
+
 __all__ = [
     # Base
     "BaseUserData",
@@ -106,5 +121,40 @@ __all__ = [
     
     # User
     "UserInfoResponse",
-    "UserProfileUpdate"
+    "UserProfileUpdate",
+    
+    # Template
+    "Template",
+    "TemplateCreate", 
+    "TemplateUpdate",
+    "Faq",
+    "FaqCreate",
+    "FaqUpdate",
+    "Opinion",
+    "OpinionCreate",
+    "OpinionUpdate",
+    "About",
+    "AboutCreate",
+    "AboutUpdate",
+    "Slider",
+    "SliderCreate",
+    "SliderUpdate",
+    "Settings",
+    "SettingsCreate",
+    "SettingsUpdate",
+    
+    # Academy Profile
+    "AcademyBasicInfo",
+    "TemplateInfo",
+    "AboutInfo",
+    "SocialLinks",
+    "SettingsInfo",
+    "MembershipInfo",
+    "ContentStatistics",
+    "SliderInfo",
+    "FaqInfo",
+    "OpinionInfo",
+    "AcademyProfileResponse",
+    "AcademyProfileSummaryResponse",
+    "PublicAcademyProfileResponse"
 ] 

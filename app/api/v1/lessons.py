@@ -406,12 +406,12 @@ async def get_lesson(
                 Video.deleted_at.is_(None)
             ).first()
             
-            # Use direct video streaming URL instead of static file path
-            direct_video_url = f"/api/v1/videos/watch-direct/{first_video.id}" if first_video else None
+            # Use video ID instead of direct URL
+            video_id = first_video.id if first_video else None
             video_info = {
                 "has_video": True,
                 "video_path": lesson.video,
-                "direct_video_url": direct_video_url,  # Direct streaming access for academy
+                "video_id": video_id,  # Video ID for frontend
                 "video_size": lesson.size_bytes,
                 "video_duration": lesson.video_duration,
                 "file_size_formatted": f"{round(lesson.size_bytes / (1024*1024), 2)} MB" if lesson.size_bytes else "0 MB",
@@ -424,7 +424,7 @@ async def get_lesson(
             video_info = {
                 "has_video": False,
                 "video_path": None,
-                "direct_video_url": None,
+                "video_id": None,
                 "video_size": 0,
                 "video_duration": 0,
                 "file_size_formatted": "0 MB",
@@ -1524,7 +1524,13 @@ async def create_lesson_exam(
 @router.post("/{lesson_id}/tools")
 async def add_interactive_tool(
     lesson_id: str,
-    tool_data: dict,
+    title: Optional[str] = Form(None, description="Tool title"),
+    description: Optional[str] = Form(None, description="Tool description"),
+    tool_type: str = Form("colored_card", description="Tool type: colored_card, timeline, text"),
+    color: Optional[str] = Form(None, description="Tool color"),
+    content: Optional[str] = Form(None, description="HTML content for text type"),
+    order_number: Optional[int] = Form(None, description="Display order"),
+    image: Optional[UploadFile] = File(None, description="Tool image"),
     db: Session = Depends(get_db),
     current_user = Depends(get_current_academy_user)
 ) -> Any:
@@ -1569,15 +1575,51 @@ async def add_interactive_tool(
                 status_code=400
             )
         
+        # Handle image upload if provided
+        image_path = None
+        if image:
+            try:
+                # Validate image file
+                if not image.content_type or not image.content_type.startswith('image/'):
+                    return SayanErrorResponse(
+                        message="الملف المرفوع ليس صورة",
+                        error_type="INVALID_FILE_TYPE",
+                        status_code=400
+                    )
+                
+                # Generate unique filename
+                file_extension = os.path.splitext(image.filename)[1] if image.filename else '.jpg'
+                filename = f"tool_{str(uuid.uuid4())}{file_extension}"
+                
+                # Create upload directory if it doesn't exist
+                upload_dir = "static/uploads/tools"
+                os.makedirs(upload_dir, exist_ok=True)
+                
+                # Save image file
+                file_path = os.path.join(upload_dir, filename)
+                with open(file_path, "wb") as buffer:
+                    image_content = await image.read()
+                    buffer.write(image_content)
+                
+                image_path = f"uploads/tools/{filename}"
+                
+            except Exception as e:
+                return SayanErrorResponse(
+                    message=f"حدث خطأ أثناء رفع الصورة: {str(e)}",
+                    error_type="FILE_UPLOAD_ERROR",
+                    status_code=500
+                )
+        
         # Create interactive tool
         tool = InteractiveTool(
             lesson_id=lesson_id,
-            title=tool_data.get("title"),
-            description=tool_data.get("description"),
-            tool_type=tool_data.get("tool_type", "colored_card"),
-            color=tool_data.get("color", "#007bff"),
-            image=tool_data.get("image"),
-            order_number=tool_data.get("order_number", 1)
+            title=title,
+            description=description,
+            tool_type=tool_type,
+            color=color,
+            image=image_path,
+            content=content,  # HTML content for text type
+            order_number=order_number
         )
         
         db.add(tool)
@@ -1586,7 +1628,6 @@ async def add_interactive_tool(
         lesson.type = "tool"
         
         db.commit()
-        db.refresh(tool)
         
         return SayanSuccessResponse(
             data={
@@ -1597,6 +1638,7 @@ async def add_interactive_tool(
                     "tool_type": tool.tool_type,
                     "color": tool.color,
                     "image": tool.image,
+                    "content": tool.content,  # HTML content for text type
                     "order_number": tool.order_number,
                     "created_at": tool.created_at.isoformat()
                 }
@@ -1606,8 +1648,9 @@ async def add_interactive_tool(
         
     except Exception as e:
         db.rollback()
+        logger.error(f"Error adding interactive tool: {str(e)}")
         return SayanErrorResponse(
-            message=f"حدث خطأ أثناء إضافة الأداة التفاعلية: {str(e)}",
+            message="حدث خطأ أثناء إضافة الأداة التفاعلية",
             error_type="INTERNAL_ERROR",
             status_code=500
         )
@@ -1880,6 +1923,7 @@ async def get_lesson_tools(
                         "tool_type": tool.tool_type,
                         "color": tool.color,
                         "image": tool.image,
+                        "content": tool.content,  # HTML content for text type
                         "order_number": tool.order_number,
                         "created_at": tool.created_at.isoformat()
                     }

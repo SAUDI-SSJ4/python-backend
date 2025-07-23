@@ -33,6 +33,12 @@ from .ai_assistant import (
     QuestionType, ContentType, MetricType, SettingType
 )
 
+# Template models
+from .template import Template, About, Slider, Faq, Opinion
+
+# Settings model
+from .settings import Settings
+
 # Token blacklist model
 from .blacklisted_token import BlacklistedToken
 
@@ -55,6 +61,10 @@ __all__ = [
     "Invoice", "InvoiceProduct", "Payment", "PaymentGatewayLog", "CouponUsage", "PaymentStatus", "PaymentGateway",
     "Exam", "Question", "QuestionOption", "QuestionType",
     "InteractiveTool", "ToolType", "LessonProgress", "StudentCourse",
+    
+    # Template models
+    "Template", "About", "Slider", "Faq", "Opinion",
+    "Settings",
     
     # AI Assistant models
     "AIAnswer", "VideoTranscription", "ExamCorrection", "QuestionCorrection",

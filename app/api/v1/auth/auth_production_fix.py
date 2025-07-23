@@ -67,7 +67,7 @@ async def production_register(
             "email": email.strip().lower() if email else "",
             "phone_number": phone_number.strip() if phone_number else "",
             "password": password,
-            "password_confirm": password_confirm,
+            "password_confirm": password,
             "user_type": user_type.strip().lower() if user_type else ""
         }
         

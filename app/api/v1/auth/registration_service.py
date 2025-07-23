@@ -17,9 +17,6 @@ from .auth_utils import (
     create_student_profile,
     create_academy_profile,
     send_verification_otp,
-    generate_academy_id,
-    generate_academy_slug,
-    generate_academy_username,
     get_current_timestamp
 )
 
@@ -119,9 +116,13 @@ class RegistrationService:
             except Exception as e:
                 print(f"خطأ في رفع Avatar: {e}")
                 # لا نرفع خطأ هنا حتى لا نؤثر على التسجيل
+                pass
         
         # Create profile
-        RegistrationService.create_user_profile(new_user, register_data, db)
+        if new_user.user_type == "student":
+            create_student_profile(new_user, register_data, db)
+        elif new_user.user_type == "academy":
+            create_academy_profile(new_user, register_data, db)
         
         # Send verification OTP
         try:
@@ -190,17 +191,14 @@ class RegistrationService:
             'academy_about': None
         })
         
-        RegistrationService.create_user_profile(new_user, profile_data, db)
+        if user_type == "student":
+            create_student_profile(new_user, profile_data, db)
+        elif user_type == "academy":
+            create_academy_profile(new_user, profile_data, db)
         
         return generate_user_tokens(new_user, db)
     
-    @staticmethod
-    def create_user_profile(user: User, profile_data: Any, db: Session):
-        """Create user profile based on user type"""
-        if user.user_type == "student":
-            create_student_profile(user, profile_data, db)
-        else:
-            create_academy_profile(user, profile_data, db)
+
     
     @staticmethod
     def link_google_account(user: User, google_data: Dict[str, Any], db: Session) -> Dict[str, Any]:

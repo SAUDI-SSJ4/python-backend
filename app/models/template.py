@@ -9,14 +9,10 @@ class Template(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     academy_id = Column(Integer, ForeignKey("academies.id"), unique=True, nullable=False)
-    theme_name = Column(String(100), default="default")
     primary_color = Column(String(7), default="#007bff")
     secondary_color = Column(String(7), default="#6c757d")
-    font_family = Column(String(100), default="Arial")
     custom_css = Column(Text, nullable=True)
     custom_js = Column(Text, nullable=True)
-    header_config = Column(JSON, nullable=True)
-    footer_config = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -40,7 +36,7 @@ class About(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     # Relationships
-    academy = relationship("Academy")
+    academy = relationship("Academy", back_populates="abouts")
 
 
 class Slider(Base):
@@ -59,7 +55,7 @@ class Slider(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     # Relationships
-    academy = relationship("Academy")
+    academy = relationship("Academy", back_populates="sliders")
 
 
 class Faq(Base):
@@ -76,7 +72,7 @@ class Faq(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     # Relationships
-    academy = relationship("Academy")
+    academy = relationship("Academy", back_populates="faqs")
 
 
 class Opinion(Base):
@@ -96,5 +92,5 @@ class Opinion(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     # Relationships
-    academy = relationship("Academy")
+    academy = relationship("Academy", back_populates="opinions")
     student = relationship("Student") 

@@ -55,9 +55,14 @@ class Academy(Base):
     # Relationships
     academy_users = relationship("AcademyUser", back_populates="academy")
     coupons = relationship("Coupon", back_populates="academy")
+    templates = relationship("Template", back_populates="academy", uselist=False)
+    abouts = relationship("About", back_populates="academy", uselist=False)
+    sliders = relationship("Slider", back_populates="academy")
+    faqs = relationship("Faq", back_populates="academy")
+    opinions = relationship("Opinion", back_populates="academy")
     
     # AI Assistant relationships
-    ai_answers = relationship("AIAnswer", back_populates="academy")
+
     video_transcriptions = relationship("VideoTranscription", back_populates="academy")
     exam_corrections = relationship("ExamCorrection", back_populates="academy")
     lesson_summaries = relationship("LessonSummary", back_populates="academy")

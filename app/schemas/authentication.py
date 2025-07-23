@@ -65,7 +65,7 @@ class UnifiedRegister(BaseUserData, BasePassword):
     }
 
 
-class Token(BaseResponse):
+class Token(BaseModel):
     """Authentication token response"""
     access_token: str = Field(..., description="JWT access token")
     refresh_token: str = Field(..., description="JWT refresh token")
@@ -80,8 +80,6 @@ class Token(BaseResponse):
                 "refresh_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
                 "token_type": "bearer",
                 "user_type": "student",
-                "status": "success",
-                "message": "Login successful",
                 "user_data": {
                     "id": 1,
                     "email": "user@example.com",

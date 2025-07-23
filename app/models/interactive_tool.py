@@ -11,6 +11,7 @@ class ToolType(str, enum.Enum):
     """Interactive tool types enumeration"""
     COLORED_CARD = "colored_card"    # Colored card with title, description, color, and image
     TIMELINE = "timeline"            # Timeline events with order
+    TEXT = "text"                    # HTML text content from frontend
     
     @classmethod
     def _missing_(cls, value):
@@ -36,12 +37,13 @@ class InteractiveTool(Base):
     lesson_id = Column(CHAR(36), ForeignKey("lessons.id", ondelete="CASCADE"), nullable=False)
     
     # Tool information
-    title = Column(String(200), nullable=False, index=True)
-    description = Column(Text, nullable=False)
-    tool_type = Column(String(50), nullable=False, default="colored_card")
-    color = Column(String(10), nullable=False, default="#007bff")   # Color theme for the tool
-    image = Column(String(255))  # Tool icon or preview image
-    order_number = Column(SmallInteger, nullable=False, default=1)  # Display order within lesson
+    title = Column(String(200), nullable=True, index=True)
+    description = Column(Text, nullable=True)
+    tool_type = Column(SQLEnum("colored_card", "timeline", "text", name="tooltype"), nullable=False, default="colored_card")
+    color = Column(String(10), nullable=True)   # Color theme for the tool
+    image = Column(String(255), nullable=True)  # Tool icon or preview image
+    content = Column(Text, nullable=True)  # HTML content for text type tools
+    order_number = Column(SmallInteger, nullable=True)  # Display order within lesson
     
     # Timestamps
     created_at = Column(DateTime, default=func.now(), nullable=False)
@@ -65,10 +67,10 @@ class InteractiveTool(Base):
     
     def validate_tool_type(self):
         """Validate tool_type value"""
-        valid_types = ["colored_card", "timeline"]
+        valid_types = ["colored_card", "timeline", "text"]
         if self.tool_type not in valid_types:
             raise ValueError(f"tool_type must be one of: {valid_types}")
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.validate_tool_type() 
+        # Only tool_type is required, all other fields are optional 

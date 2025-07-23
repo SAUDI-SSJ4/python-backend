@@ -114,7 +114,7 @@ async def get_course_chapters(
                     "views_count": lesson.views_count or 0,
                     "has_video": bool(lesson.video),
                     "video_count": videos_count,
-                    "direct_video_url": f"/api/v1/videos/watch-direct/{first_video.id}" if first_video else None
+                    "video_id": first_video.id if first_video else None
                 })
             elif lesson.type == "exam":
                 # Get exams and questions count separately
@@ -355,7 +355,7 @@ async def get_chapter_details(
                 "views_count": lesson.views_count or 0,
                 "has_video": bool(lesson.video),
                 "video_count": videos_count,
-                "direct_video_url": f"/api/v1/videos/watch-direct/{first_video.id}" if first_video else None
+                "video_id": first_video.id if first_video else None
             })
         elif lesson.type == "exam":
             # Get exams and questions count separately

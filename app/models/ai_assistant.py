@@ -152,7 +152,6 @@ class AIAnswer(Base):
     id = Column(Integer, primary_key=True, index=True)
     lesson_id = Column(CHAR(36), ForeignKey("lessons.id", ondelete="CASCADE"), nullable=False, index=True)
     student_id = Column(Integer, ForeignKey("students.id", ondelete="SET NULL"), nullable=True, index=True)
-    academy_id = Column(Integer, ForeignKey("academies.id", ondelete="CASCADE"), nullable=True, index=True)
     
     # Core content fields
     question = Column(String(255), nullable=False)
@@ -188,12 +187,10 @@ class AIAnswer(Base):
     # Relationships
     lesson = relationship("Lesson", back_populates="ai_answers")
     student = relationship("Student", back_populates="ai_answers")
-    academy = relationship("Academy", back_populates="ai_answers")
 
     # Database indexes for performance
     __table_args__ = (
         Index('ix_ai_answers_lesson_student', 'lesson_id', 'student_id'),
-        Index('ix_ai_answers_academy_type', 'academy_id', 'answer_type'),
         {'mysql_charset': 'utf8mb4', 'mysql_collate': 'utf8mb4_unicode_ci'}
     )
 

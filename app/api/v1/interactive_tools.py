@@ -5,8 +5,11 @@ Supporting colored cards and timeline tools
 """
 
 from typing import Any, List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from sqlalchemy.orm import Session
+import os
+import uuid
+import logging
 
 from app.deps.database import get_db
 from app.deps.auth import get_current_academy_user, get_current_student
@@ -18,6 +21,7 @@ from app.models.student import Student
 from app.core.response_handler import SayanSuccessResponse, SayanErrorResponse
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 # =====================================
 # SIMPLIFIED INTERACTIVE TOOLS ENDPOINTS
@@ -72,6 +76,7 @@ async def get_tool_details(
                     "tool_type": tool.tool_type,
                     "color": tool.color,
                     "image": tool.image,
+                    "content": tool.content,  # HTML content for text type
                     "order_number": tool.order_number,
                     "created_at": tool.created_at.isoformat(),
                     "updated_at": tool.updated_at.isoformat()
@@ -91,7 +96,13 @@ async def get_tool_details(
 @router.put("/tools/{tool_id}")
 async def update_tool(
     tool_id: str,
-    tool_data: dict,
+    title: Optional[str] = Form(None, description="Tool title"),
+    description: Optional[str] = Form(None, description="Tool description"),
+    tool_type: Optional[str] = Form(None, description="Tool type: colored_card, timeline, text"),
+    color: Optional[str] = Form(None, description="Tool color"),
+    content: Optional[str] = Form(None, description="HTML content for text type"),
+    order_number: Optional[int] = Form(None, description="Display order"),
+    image: Optional[UploadFile] = File(None, description="Tool image"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_academy_user)
 ) -> Any:
@@ -129,11 +140,54 @@ async def update_tool(
                 status_code=403
             )
         
-        # Update tool fields
-        allowed_fields = ["title", "description", "tool_type", "color", "image", "order_number"]
-        for field, value in tool_data.items():
-            if field in allowed_fields and hasattr(tool, field):
-                setattr(tool, field, value)
+        # Handle image upload if provided
+        if image:
+            try:
+                # Validate image file
+                if not image.content_type or not image.content_type.startswith('image/'):
+                    return SayanErrorResponse(
+                        message="الملف المرفوع ليس صورة",
+                        error_type="INVALID_FILE_TYPE",
+                        status_code=400
+                    )
+                
+                # Generate unique filename
+                file_extension = os.path.splitext(image.filename)[1] if image.filename else '.jpg'
+                filename = f"tool_{str(uuid.uuid4())}{file_extension}"
+                
+                # Create upload directory if it doesn't exist
+                upload_dir = "static/uploads/tools"
+                os.makedirs(upload_dir, exist_ok=True)
+                
+                # Save image file
+                file_path = os.path.join(upload_dir, filename)
+                with open(file_path, "wb") as buffer:
+                    image_content = await image.read()
+                    buffer.write(image_content)
+                
+                image_path = f"uploads/tools/{filename}"
+                tool.image = image_path
+                
+            except Exception as e:
+                return SayanErrorResponse(
+                    message=f"حدث خطأ أثناء رفع الصورة: {str(e)}",
+                    error_type="FILE_UPLOAD_ERROR",
+                    status_code=500
+                )
+        
+        # Update tool fields - all fields are optional
+        if title is not None:
+            tool.title = title
+        if description is not None:
+            tool.description = description
+        if tool_type is not None:
+            tool.tool_type = tool_type
+        if color is not None:
+            tool.color = color
+        if content is not None:
+            tool.content = content
+        if order_number is not None:
+            tool.order_number = order_number
         
         db.commit()
         db.refresh(tool)
@@ -147,6 +201,7 @@ async def update_tool(
                     "tool_type": tool.tool_type,
                     "color": tool.color,
                     "image": tool.image,
+                    "content": tool.content,  # HTML content for text type
                     "order_number": tool.order_number,
                     "updated_at": tool.updated_at.isoformat()
                 }
@@ -156,11 +211,13 @@ async def update_tool(
         
     except Exception as e:
         db.rollback()
+        logger.error(f"Error updating interactive tool: {str(e)}")
         return SayanErrorResponse(
-            message=f"حدث خطأ أثناء تحديث الأداة التفاعلية: {str(e)}",
+            message="حدث خطأ أثناء تحديث الأداة التفاعلية",
             error_type="INTERNAL_ERROR",
             status_code=500
         )
+
 
 
 @router.delete("/tools/{tool_id}")
@@ -260,6 +317,7 @@ async def get_tool_for_student(
                     "tool_type": tool.tool_type,
                     "color": tool.color,
                     "image": tool.image,
+                    "content": tool.content,  # HTML content for text type
                     "order_number": tool.order_number
                 }
             },
@@ -308,6 +366,7 @@ async def get_lesson_tools_for_student(
                         "tool_type": tool.tool_type,
                         "color": tool.color,
                         "image": tool.image,
+                        "content": tool.content,  # HTML content for text type
                         "order_number": tool.order_number
                     }
                     for tool in tools

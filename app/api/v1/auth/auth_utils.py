@@ -13,6 +13,7 @@ import secrets
 
 from app.core import security
 from app.schemas.auth import Token
+from app.schemas.authentication import Token as AuthToken
 from app.models.user import User
 from app.models.student import Student
 from app.models.academy import Academy, AcademyUser, AcademyStatus, TrialStatus
@@ -204,54 +205,61 @@ def send_verification_otp(user: User, db: Session):
 
 def generate_user_tokens(user: User, db: Session) -> Token:
     """Generate JWT tokens for user with optional additional data"""
-    token_data = {
-        "user_id": user.id,
-        "user_type": user.user_type,
-        "email": user.email
-    }
-    
-    access_token = security.create_access_token(
-        subject=token_data["user_id"],
-        user_type=token_data["user_type"],
-        additional_claims={"email": token_data["email"]}
-    )
-    refresh_token = security.create_refresh_token(
-        subject=token_data["user_id"],
-        user_type=token_data["user_type"]
-    )
-    
-    user_data = {
-        "id": user.id,
-        "email": user.email,
-        "fname": user.fname,
-        "lname": user.lname,
-        "user_type": user.user_type,
-        "account_type": user.account_type,
-        "verified": user.verified,
-        "status": user.status,
-        "avatar": user.avatar
-    }
-    
-    if user.user_type == "student":
-        user_data["profile_type"] = "student"
-    elif user.user_type == "academy":
-        user_data["profile_type"] = "academy"
-    
-    # Prepare response data
-    response_data = {
+    try:
+        token_data = {
+            "user_id": user.id,
+            "user_type": user.user_type,
+            "email": user.email
+        }
+        
+        access_token = security.create_access_token(
+            subject=token_data["user_id"],
+            user_type=token_data["user_type"],
+            additional_claims={"email": token_data["email"]}
+        )
+        refresh_token = security.create_refresh_token(
+            subject=token_data["user_id"],
+            user_type=token_data["user_type"]
+        )
+        
+        user_data = {
+            "id": user.id,
+            "email": user.email,
+            "fname": user.fname,
+            "lname": user.lname,
+            "user_type": user.user_type,
+            "account_type": user.account_type,
+            "verified": user.verified,
+            "status": user.status,
+            "avatar": user.avatar
+        }
+        
+        if user.user_type == "student":
+            user_data["profile_type"] = "student"
+        elif user.user_type == "academy":
+            user_data["profile_type"] = "academy"
+        
+        # Prepare response data
+        response_data = {
             "access_token": access_token,
             "refresh_token": refresh_token,
             "token_type": "bearer",
             "user_type": user.user_type,
             "user_data": user_data
-    }
-    
-    return create_unified_success_response(
-        data=response_data,
-        message="أهلاً بك" if not user.is_verified else "تم تسجيل الدخول بنجاح",
-        status_code=201,
-        path="/api/v1/auth/login"
-    )
+        }
+        
+        return AuthToken(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            token_type="bearer",
+            user_type=user.user_type,
+            user_data=user_data
+        )
+    except Exception as e:
+        print(f"خطأ في توليد التوكنات: {str(e)}")
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}")
+        raise e
 
 
 def generate_verification_token(user_id: int, email: str, purpose: str = "password_reset", expires_in_minutes: int = 5) -> str:

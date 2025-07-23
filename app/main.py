@@ -179,6 +179,15 @@ except Exception as e:
     print(f"Failed to load cart router: {e}")
 
 try:
+    from app.api.v1.academy_profile import router as academy_profile_router
+    academy_profile_available = True
+    print("Successfully loaded academy profile router")
+except Exception as e:
+    academy_profile_available = False
+    academy_profile_router = None
+    print(f"Failed to load academy profile router: {e}")
+
+try:
     from app.api.v1.payment import router as payment_router
     payment_available = True
     print("Successfully loaded payment router")
@@ -524,6 +533,14 @@ if cart_available:
         tags=["Cart Management"]
     )
     print("Cart router registered successfully")
+
+if academy_profile_available:
+    app.include_router(
+        academy_profile_router,
+        prefix="/api/v1/academy",
+        tags=["Academy Profile"]
+    )
+    print("Academy profile router registered successfully")
 
 if payment_available:
     app.include_router(
