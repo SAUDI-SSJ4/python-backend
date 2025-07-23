@@ -567,7 +567,13 @@ async def get_lesson(
 @router.put("/{lesson_id}", response_model=LessonResponse)
 async def update_lesson(
     lesson_id: str,
-    lesson_data: LessonUpdate,
+    title: Optional[str] = Form(None, min_length=3, max_length=255, description="Lesson title"),
+    description: Optional[str] = Form(None, description="Lesson description"),
+    type: Optional[str] = Form(None, description="Lesson type"),
+    order_number: Optional[int] = Form(None, ge=0, description="Lesson order"),
+    status: Optional[bool] = Form(None, description="Lesson status"),
+    is_free_preview: Optional[bool] = Form(None, description="Is free preview"),
+    video_duration: Optional[int] = Form(None, ge=0, description="Video duration in seconds"),
     db: Session = Depends(get_db),
     current_user = Depends(get_current_academy_user)
 ) -> Any:
@@ -598,7 +604,22 @@ async def update_lesson(
             )
         
         # Update data
-        update_data = lesson_data.dict(exclude_unset=True)
+        update_data = {}
+        if title is not None:
+            update_data['title'] = title
+        if description is not None:
+            update_data['description'] = description
+        if type is not None:
+            update_data['type'] = type
+        if order_number is not None:
+            update_data['order_number'] = order_number
+        if status is not None:
+            update_data['status'] = status
+        if is_free_preview is not None:
+            update_data['is_free_preview'] = is_free_preview
+        if video_duration is not None:
+            update_data['video_duration'] = video_duration
+        
         for field, value in update_data.items():
             setattr(lesson, field, value)
         
