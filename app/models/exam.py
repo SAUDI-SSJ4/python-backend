@@ -98,9 +98,6 @@ class Question(Base):
     score = Column(Integer, nullable=False)
     correct_answer = Column(String(255))  # For text and simple questions
     
-    # Indicates whether the question was generated automatically by AI
-    is_ai_generated = Column(Boolean, default=False, nullable=False)
-    
     # Timestamps
     created_at = Column(DateTime, default=func.now(), nullable=False)
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)

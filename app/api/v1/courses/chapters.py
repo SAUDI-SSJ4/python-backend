@@ -4,7 +4,8 @@ from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 
 from app.deps.database import get_db
-from app.deps.auth import get_current_academy_user, get_current_student
+from app.deps.auth_improved import get_current_academy_user_improved, verify_course_ownership_improved
+from app.deps.auth import get_current_student
 from app.models.chapter import Chapter
 from app.models.course import Course
 from app.models.user import User
@@ -31,26 +32,21 @@ async def get_course_chapters(
     course_id: str,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_academy_user)
+    current_user: User = Depends(get_current_academy_user_improved)
 ):
     """
     Get all chapters for a specific course with lessons data included.
     
     Returns ordered list of chapters with lesson details, counts and duration information.
     """
-    # Verify course ownership
+    # Verify course ownership with improved error handling
+    verify_course_ownership_improved(course_id, current_user, db, request)
+    
+    # Get the course after verification
     course = db.query(Course).filter(
         Course.id == course_id,
         Course.academy_id == current_user.academy.id
     ).first()
-    
-    if not course:
-        return error_json_response(
-            message="الدورة غير موجودة",
-            status_code=404,
-            error_type="Not Found",
-            request=request
-        )
     
     # Get chapters first to avoid collation issues
     chapters = db.query(Chapter).filter(
@@ -198,7 +194,7 @@ async def create_chapter(
     order_number: int = Form(0, ge=0, description="ترتيب الفصل داخل الكورس"),
     is_published: bool = Form(True, description="هل الفصل منشور"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_academy_user)
+    current_user: User = Depends(get_current_academy_user_improved)
 ):
     """
     Create a new chapter for the course.
@@ -206,21 +202,15 @@ async def create_chapter(
     Automatically assigns order number if not provided.
     Accepts form-data instead of JSON.
     """
-    # Verify course ownership
-    course = db.query(Course).filter(
-        Course.id == course_id,
-        Course.academy_id == current_user.academy.id
-    ).first()
-    
-    if not course:
-        return error_json_response(
-            message="الدورة غير موجودة",
-            status_code=404,
-            error_type="Not Found",
-            request=request
-        )
-    
     try:
+        # Verify course ownership with improved error handling
+        verify_course_ownership_improved(course_id, current_user, db, request)
+        
+        # Get the course after verification
+        course = db.query(Course).filter(
+            Course.id == course_id,
+            Course.academy_id == current_user.academy.id
+        ).first()
         # Auto-assign order number if not provided
         if order_number == 0:
             last_chapter = db.query(Chapter).filter(
@@ -268,7 +258,7 @@ async def get_chapter_details(
     chapter_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_academy_user)
+    current_user: User = Depends(get_current_academy_user_improved)
 ):
     """
     Get detailed information for a specific chapter.
@@ -429,7 +419,7 @@ async def update_chapter(
     chapter_data: ChapterUpdate,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_academy_user)
+    current_user: User = Depends(get_current_academy_user_improved)
 ):
     """
     Update an existing chapter.
@@ -496,7 +486,7 @@ async def update_chapter(
 async def delete_chapter(
     chapter_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_academy_user)
+    current_user: User = Depends(get_current_academy_user_improved)
 ):
     """
     Delete a chapter and all its lessons.
@@ -552,7 +542,7 @@ async def reorder_chapters(
     course_id: str,
     reorder_data: ChaptersBulkOrderUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_academy_user)
+    current_user: User = Depends(get_current_academy_user_improved)
 ):
     """
     Reorder chapters within a course.

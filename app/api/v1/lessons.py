@@ -1,5 +1,5 @@
 from typing import Any, List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Path, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Path, BackgroundTasks, Body
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from datetime import datetime
@@ -9,7 +9,7 @@ import os
 import json
 
 from app.deps.database import get_db
-from app.deps.auth import get_current_academy_user, get_current_student
+from app.deps.auth_custom import get_current_academy_user_custom, get_current_student_custom
 from app.models.lesson import Lesson
 from app.models.chapter import Chapter
 from app.models.course import Course
@@ -39,7 +39,7 @@ from app.core.ai_config import AIServiceFactory, ai_config, AIServiceConfig
 from app.core.config import settings
 from app.services.ai.openai_service import OpenAIChatService, OpenAIServiceError
 
-router = APIRouter()
+router = APIRouter(tags=["Lessons Management"])
 file_service = FileService()
 video_processing_service = VideoProcessingService()
 logger = logging.getLogger(__name__)
@@ -165,7 +165,7 @@ def format_time(seconds):
     
     return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
 
-@router.post("/{chapter_id}", response_model=LessonResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/lessons/{chapter_id}", response_model=LessonResponse, status_code=status.HTTP_201_CREATED)
 async def create_lesson(
     chapter_id: str = Path(..., description="Chapter ID"),
     title: str = Form(..., min_length=3, max_length=255, description="Lesson title"),
@@ -176,7 +176,7 @@ async def create_lesson(
     is_free_preview: bool = Form(False, description="Is free preview"),
     video_duration: Optional[int] = Form(None, description="Video duration in seconds"),
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_academy_user)
+    current_user = Depends(get_current_academy_user_custom)
 ) -> Any:
     """
     Create a new lesson without video
@@ -351,11 +351,90 @@ async def create_lesson(
             status_code=500
         )
 
-@router.get("/{lesson_id}")
+@router.get("/academy/lessons")
+async def get_academy_lessons(
+    chapter_id: Optional[str] = None,
+    course_id: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_academy_user_custom)
+) -> Any:
+    """
+    Get list of lessons for the current academy with optional filtering by chapter or course
+    """
+    try:
+        from sqlalchemy.orm import joinedload
+        
+        query = db.query(Lesson).options(
+            joinedload(Lesson.chapter),
+            joinedload(Lesson.course).joinedload(Course.product)
+        )
+        
+        # Filter by academy ownership
+        query = query.join(Course).filter(Course.academy_id == current_user.academy.id)
+        
+        # Apply filters
+        if chapter_id:
+            query = query.filter(Lesson.chapter_id == chapter_id)
+        
+        if course_id:
+            query = query.filter(Lesson.course_id == course_id)
+        
+        # Get total count
+        total_count = query.count()
+        
+        # Apply pagination
+        lessons = query.offset(offset).limit(limit).all()
+        
+        # Prepare response data
+        lessons_data = []
+        for lesson in lessons:
+            lesson_data = {
+                "id": lesson.id,
+                "title": lesson.title,
+                "description": lesson.description,
+                "type": lesson.type,
+                "order_number": lesson.order_number,
+                "status": lesson.status,
+                "is_free_preview": lesson.is_free_preview,
+                "chapter_id": lesson.chapter_id,
+                "course_id": lesson.course_id,
+                "chapter_title": lesson.chapter.title if lesson.chapter else None,
+                "course_title": lesson.course.product.title if lesson.course and lesson.course.product else None,
+                "created_at": lesson.created_at.isoformat() if lesson.created_at else None,
+                "updated_at": lesson.updated_at.isoformat() if lesson.updated_at else None,
+            }
+            lessons_data.append(lesson_data)
+        
+        return {
+            "status": "success",
+            "status_code": 200,
+            "error_type": None,
+            "message": "تم جلب قائمة الدروس بنجاح",
+            "data": {
+                "lessons": lessons_data,
+                "total_count": total_count,
+                "limit": limit,
+                "offset": offset
+            },
+            "path": "/api/v1/lessons/academy/lessons",
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting lessons: {str(e)}")
+        return SayanErrorResponse(
+            message=f"خطأ أثناء جلب قائمة الدروس: {str(e)}",
+            error_type="INTERNAL_ERROR",
+            status_code=500
+        )
+
+@router.get("/lessons/{lesson_id}", summary="Get Lesson Details")
 async def get_lesson(
     lesson_id: str,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_academy_user)
+    current_user = Depends(get_current_academy_user_custom)
 ) -> Any:
     """
     Get lesson details with unified response format
@@ -564,18 +643,12 @@ async def get_lesson(
             status_code=500
         )
 
-@router.put("/{lesson_id}", response_model=LessonResponse)
+@router.put("/lessons/{lesson_id}", response_model=LessonResponse, summary="Update Lesson")
 async def update_lesson(
     lesson_id: str,
-    title: Optional[str] = Form(None, min_length=3, max_length=255, description="Lesson title"),
-    description: Optional[str] = Form(None, description="Lesson description"),
-    type: Optional[str] = Form(None, description="Lesson type"),
-    order_number: Optional[int] = Form(None, ge=0, description="Lesson order"),
-    status: Optional[bool] = Form(None, description="Lesson status"),
-    is_free_preview: Optional[bool] = Form(None, description="Is free preview"),
-    video_duration: Optional[int] = Form(None, ge=0, description="Video duration in seconds"),
+    lesson_data: dict = Body(None, description="Lesson update data"),
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_academy_user)
+    current_user = Depends(get_current_academy_user_custom)
 ) -> Any:
     """
     Update lesson
@@ -603,24 +676,14 @@ async def update_lesson(
                 status_code=403
             )
         
-        # Update data
-        update_data = {}
-        if title is not None:
-            update_data['title'] = title
-        if description is not None:
-            update_data['description'] = description
-        if type is not None:
-            update_data['type'] = type
-        if order_number is not None:
-            update_data['order_number'] = order_number
-        if status is not None:
-            update_data['status'] = status
-        if is_free_preview is not None:
-            update_data['is_free_preview'] = is_free_preview
-        if video_duration is not None:
-            update_data['video_duration'] = video_duration
+        # Update data from JSON body
+        update_data = lesson_data or {}
         
-        for field, value in update_data.items():
+        # Validate allowed fields
+        allowed_fields = ['title', 'description', 'type', 'order_number', 'status', 'is_free_preview', 'video_duration']
+        filtered_data = {k: v for k, v in update_data.items() if k in allowed_fields}
+        
+        for field, value in filtered_data.items():
             setattr(lesson, field, value)
         
         db.commit()
@@ -642,16 +705,27 @@ async def update_lesson(
             status_code=500
         )
 
-@router.delete("/{lesson_id}")
+@router.delete("/lessons/{lesson_id}", summary="Delete Lesson")
 async def delete_lesson(
     lesson_id: str,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_academy_user)
+    current_user = Depends(get_current_academy_user_custom)
 ) -> Any:
     """Delete lesson"""
     
     try:
-        lesson = db.query(Lesson).filter(Lesson.id == lesson_id).first()
+        # Use joinedload to avoid lazy loading issues during deletion
+        from sqlalchemy.orm import joinedload
+        
+        lesson = db.query(Lesson).options(
+            joinedload(Lesson.interactive_tools),
+            joinedload(Lesson.videos),
+            joinedload(Lesson.exams),
+            joinedload(Lesson.ai_answers),
+            joinedload(Lesson.video_transcriptions),
+            joinedload(Lesson.ai_summaries),
+            joinedload(Lesson.ai_exam_templates)
+        ).filter(Lesson.id == lesson_id).first()
         
         if not lesson:
             return SayanErrorResponse(
@@ -672,6 +746,7 @@ async def delete_lesson(
                 status_code=403
             )
         
+        # Delete the lesson (cascade will handle related records)
         db.delete(lesson)
         db.commit()
         
@@ -687,13 +762,14 @@ async def delete_lesson(
         )
     except Exception as e:
         db.rollback()
+        logger.error(f"Error deleting lesson {lesson_id}: {str(e)}")
         return SayanErrorResponse(
             message=f"خطأ أثناء حذف الدرس: {str(e)}",
             error_type="INTERNAL_ERROR",
             status_code=500
         )
 
-@router.post("/{lesson_id}/video")
+@router.post("/lessons/{lesson_id}/video", summary="Upload Lesson Video")
 async def upload_lesson_video(
     lesson_id: str,
     background_tasks: BackgroundTasks,
@@ -702,7 +778,7 @@ async def upload_lesson_video(
     description: Optional[str] = Form(None, description="Video description (optional)"),
     auto_transcribe: bool = Form(True, description="Enable automatic transcription"),
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_academy_user)
+    current_user = Depends(get_current_academy_user_custom)
 ) -> Any:
     """
     Upload video for previously created lesson
@@ -840,11 +916,11 @@ async def upload_lesson_video(
             status_code=500
         )
 
-@router.get("/{lesson_id}/transcription/status", response_model=TranscriptionStatusResponse)
+@router.get("/lessons/{lesson_id}/transcription/status", response_model=TranscriptionStatusResponse)
 async def get_transcription_status(
     lesson_id: str,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_academy_user)
+    current_user = Depends(get_current_academy_user_custom)
 ) -> Any:
     """
     Get video transcription status for a lesson
@@ -971,11 +1047,11 @@ async def get_transcription_status(
         )
 
 
-@router.get("/{lesson_id}/transcription/error-details", response_model=TranscriptionErrorDetailsResponse)
+@router.get("/lessons/{lesson_id}/transcription/error-details", response_model=TranscriptionErrorDetailsResponse)
 async def get_transcription_error_details(
     lesson_id: str,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_academy_user)
+    current_user = Depends(get_current_academy_user_custom)
 ) -> Any:
     """
     Get detailed error information for failed transcription
@@ -1073,11 +1149,11 @@ async def get_transcription_error_details(
             status_code=500
         )
 
-@router.get("/{lesson_id}/transcription/model-message", response_model=TranscriptionModelMessage)
+@router.get("/lessons/{lesson_id}/transcription/model-message", response_model=TranscriptionModelMessage)
 async def get_transcription_model_message(
     lesson_id: str,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_academy_user)
+    current_user = Depends(get_current_academy_user_custom)
 ) -> Any:
     """
     الحصول على رسالة النموذج المبسطة للتحويل
@@ -1166,12 +1242,12 @@ async def get_transcription_model_message(
             status_code=500
         )
 
-@router.get("/{lesson_id}/transcription/text")
+@router.get("/lessons/{lesson_id}/transcription/text")
 async def get_transcription_text(
     lesson_id: str,
     format: str = "text",  # text, srt, json
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_academy_user)
+    current_user = Depends(get_current_academy_user_custom)
 ) -> Any:
     """
     Get transcription text in different formats
@@ -1251,11 +1327,11 @@ async def get_transcription_text(
             status_code=500
         )
 
-@router.get("/{lesson_id}/status")
+@router.get("/lessons/{lesson_id}/status")
 async def get_lesson_status(
     lesson_id: str,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_academy_user)
+    current_user = Depends(get_current_academy_user_custom)
 ) -> Any:
     """
     Get lesson status and video upload status
@@ -1406,12 +1482,12 @@ async def get_lesson_status(
             status_code=500
         )
 
-@router.post("/{lesson_id}/exam")
+@router.post("/lessons/{lesson_id}/exam")
 async def create_lesson_exam(
     lesson_id: str,
-    exam_data: dict,
+    exam_data: dict = Body(..., description="Exam data with questions in JSON format"),
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_academy_user)
+    current_user = Depends(get_current_academy_user_custom)
 ) -> Any:
     """
     Create exam for lesson
@@ -1472,41 +1548,76 @@ async def create_lesson_exam(
         
         if questions_data:
             for question_data in questions_data:
-                # Determine question type - match database enum values
-                question_type = QuestionType.TEXT  # Default
-                if question_data.get("type") == "multiple_choice":
-                    question_type = QuestionType.MULTIPLE_CHOICE
-                elif question_data.get("type") == "true_false":
-                    question_type = QuestionType.TRUE_FALSE
-                elif question_data.get("type") == "text":
-                    question_type = QuestionType.TEXT
-                
-                # Create question
-                question = Question(
-                    exam_id=exam.id,
-                    title=question_data.get("question_text", ""),
-                    description=question_data.get("explanation", ""),
-                    type=question_type,
-                    score=question_data.get("points", 10),
-                    correct_answer=question_data.get("explanation", "")
-                )
-                
-                db.add(question)
-                db.flush()  # Get question ID before adding options
-                
-                # Add options for choice-based questions
-                if question_data.get("type") in ["multiple_choice", "true_false"]:
-                    if question_data.get("options"):
-                        # Add custom options for choice-based questions
-                        for option_data in question_data.get("options", []):
+                try:
+                    # Determine question type - match database enum values
+                    question_type = QuestionType.TEXT  # Default
+                    if question_data.get("type") == "multiple_choice":
+                        question_type = QuestionType.MULTIPLE_CHOICE
+                    elif question_data.get("type") == "true_false":
+                        question_type = QuestionType.TRUE_FALSE
+                    elif question_data.get("type") == "text":
+                        question_type = QuestionType.TEXT
+                    
+                    # Get question text from multiple possible fields
+                    question_text = (
+                        question_data.get("question_text") or 
+                        question_data.get("question") or 
+                        question_data.get("title") or 
+                        ""
+                    )
+                    
+                    # Get explanation from multiple possible fields
+                    explanation = (
+                        question_data.get("explanation") or 
+                        question_data.get("description") or 
+                        ""
+                    )
+                    
+                    # Get points/score
+                    points = question_data.get("points", question_data.get("score", 10))
+                    
+                    # Create question
+                    question = Question(
+                        exam_id=exam.id,
+                        title=question_text,
+                        description=explanation,
+                        type=question_type,
+                        score=points,
+                        correct_answer=explanation
+                    )
+                    
+                    db.add(question)
+                    db.flush()  # Get question ID before adding options
+                    
+                    # Add options for choice-based questions
+                    if question_type in [QuestionType.MULTIPLE_CHOICE, QuestionType.TRUE_FALSE]:
+                        options = question_data.get("options", [])
+                        correct_answer_text = ""
+                        
+                        for option_data in options:
+                            option_text = option_data.get("text", "")
+                            is_correct = option_data.get("is_correct", False)
+                            
                             option = QuestionOption(
                                 question_id=question.id,
-                                text=option_data.get("text", ""),
-                                is_correct=option_data.get("is_correct", False)
+                                text=option_text,
+                                is_correct=is_correct
                             )
                             db.add(option)
-                
-                questions_count += 1
+                            
+                            if is_correct:
+                                correct_answer_text = option_text
+                        
+                        # Update correct answer
+                        if correct_answer_text:
+                            question.correct_answer = correct_answer_text
+                    
+                    questions_count += 1
+                        
+                except Exception as question_error:
+                    logger.error(f"Error creating question: {str(question_error)}")
+                    logger.error(f"Question data: {question_data}")
+                    continue
         
         # Update lesson type to exam
         lesson.type = "exam"
@@ -1542,7 +1653,7 @@ async def create_lesson_exam(
             status_code=500
         )
 
-@router.post("/{lesson_id}/tools")
+@router.post("/lessons/{lesson_id}/tools")
 async def add_interactive_tool(
     lesson_id: str,
     title: Optional[str] = Form(None, description="Tool title"),
@@ -1553,7 +1664,7 @@ async def add_interactive_tool(
     order_number: Optional[int] = Form(None, description="Display order"),
     image: Optional[UploadFile] = File(None, description="Tool image"),
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_academy_user)
+    current_user = Depends(get_current_academy_user_custom)
 ) -> Any:
     """
     Add interactive tool to lesson
@@ -1677,11 +1788,11 @@ async def add_interactive_tool(
         )
 
 # Student Progress Endpoints
-@router.get("/{lesson_id}/progress", response_model=LessonProgressResponse)
+@router.get("/lessons/{lesson_id}/progress", response_model=LessonProgressResponse)
 async def get_lesson_progress(
     lesson_id: str,
     db: Session = Depends(get_db),
-    current_student: Student = Depends(get_current_student)
+    current_student: Student = Depends(get_current_student_custom)
 ) -> Any:
     """
     Get student progress for a lesson with access control
@@ -1745,12 +1856,12 @@ async def get_lesson_progress(
             details={"lesson_id": lesson_id}
         )
 
-@router.put("/{lesson_id}/progress", response_model=LessonProgressResponse)
+@router.put("/lessons/{lesson_id}/progress", response_model=LessonProgressResponse)
 async def update_lesson_progress(
     lesson_id: str,
     progress_data: LessonProgressUpdate,
     db: Session = Depends(get_db),
-    current_student: Student = Depends(get_current_student)
+    current_student: Student = Depends(get_current_student_custom)
 ) -> Any:
     """
     Update student progress for a lesson with access control
@@ -1813,11 +1924,11 @@ async def update_lesson_progress(
             detail={"status": "error", "error": f"حدث خطأ أثناء تحديث تقدم الدرس: {str(e)}"}
         )
 
-@router.get("/{lesson_id}/videos")
+@router.get("/lessons/{lesson_id}/videos")
 async def get_lesson_videos(
     lesson_id: str,
     db: Session = Depends(get_db),
-    current_student: Student = Depends(get_current_student)
+    current_student: Student = Depends(get_current_student_custom)
 ) -> Any:
     """Get lesson videos with access control"""
     try:
@@ -1869,11 +1980,11 @@ async def get_lesson_videos(
             details={"lesson_id": lesson_id}
         )
 
-@router.get("/{lesson_id}/exams")
+@router.get("/lessons/{lesson_id}/exams")
 async def get_lesson_exams(
     lesson_id: str,
     db: Session = Depends(get_db),
-    current_student: Student = Depends(get_current_student)
+    current_student: Student = Depends(get_current_student_custom)
 ) -> Any:
     """Get lesson exams"""
     try:
@@ -1913,11 +2024,11 @@ async def get_lesson_exams(
             status_code=500
         )
 
-@router.get("/{lesson_id}/tools")
+@router.get("/lessons/{lesson_id}/tools")
 async def get_lesson_tools(
     lesson_id: str,
     db: Session = Depends(get_db),
-    current_student: Student = Depends(get_current_student)
+    current_student: Student = Depends(get_current_student_custom)
 ) -> Any:
     """Get lesson interactive tools"""
     try:
@@ -1964,7 +2075,7 @@ async def get_lesson_tools(
 @router.post("/check-video-file")
 async def check_video_file(
     video_file: UploadFile = File(...),
-    current_user = Depends(get_current_academy_user)
+    current_user = Depends(get_current_academy_user_custom)
 ) -> Any:
     """
     Check video file compatibility before upload
@@ -2046,7 +2157,7 @@ async def check_video_file(
 
 @router.get("/video-upload-info")
 async def get_video_upload_info(
-    current_user = Depends(get_current_academy_user)
+    current_user = Depends(get_current_academy_user_custom)
 ) -> Any:
     """
     Get video upload limitations and transcription capabilities
@@ -2117,7 +2228,7 @@ async def get_video_upload_info(
             status_code=500
         )
 
-@router.post("/chapters/{chapter_id}/exam-lesson")
+@router.post("/lessons/chapters/{chapter_id}/exam-lesson")
 async def create_exam_lesson_with_ai(
     chapter_id: str = Path(..., description="Chapter ID"),
     title: str = Form(..., min_length=3, max_length=255, description="Exam lesson title"),
@@ -2133,7 +2244,7 @@ async def create_exam_lesson_with_ai(
     status: bool = Form(True, description="Lesson status"),
     is_free_preview: bool = Form(False, description="Is free preview"),
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_academy_user)
+    current_user = Depends(get_current_academy_user_custom)
 ) -> Any:
     """
     Create exam lesson with AI question generation based on chapter video content

@@ -65,8 +65,8 @@ async def get_current_user(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail={
                     "status": 401,
-                    "error": "Unauthorized",
-                    "message": "غير مخول للوصول",
+                    "error_type": "INVALID_TOKEN",
+                    "message": "الـ token غير صالح أو منتهي الصلاحية",
                     "path": "/api/v1/auth/",
                     "timestamp": datetime.utcnow().isoformat()
                 }
@@ -84,7 +84,7 @@ async def get_current_user(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={
                     "status": 404,
-                    "error": "Not Found",
+                    "error_type": "USER_NOT_FOUND",
                     "message": "المستخدم غير موجود",
                     "path": "/api/v1/auth/",
                     "timestamp": datetime.utcnow().isoformat()
@@ -96,7 +96,7 @@ async def get_current_user(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={
                     "status": 403,
-                    "error": "Forbidden",
+                    "error_type": "ACCOUNT_BLOCKED",
                     "message": "الحساب محظور",
                     "path": "/api/v1/auth/",
                     "timestamp": datetime.utcnow().isoformat()
@@ -108,7 +108,7 @@ async def get_current_user(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={
                     "status": 403,
-                    "error": "Forbidden",
+                    "error_type": "ACCOUNT_INACTIVE",
                     "message": "الحساب غير مفعل",
                     "path": "/api/v1/auth/",
                     "timestamp": datetime.utcnow().isoformat()
@@ -122,8 +122,8 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={
                 "status": 401,
-                "error": "Unauthorized",
-                "message": "رمز المصادقة غير صحيح",
+                "error_type": "TOKEN_EXPIRED",
+                "message": "الـ token منتهي الصلاحية أو غير صحيح",
                 "path": "/api/v1/auth/",
                 "timestamp": datetime.utcnow().isoformat()
             }
@@ -151,7 +151,7 @@ async def get_current_academy_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
                 "status": 403,
-                "error": "Forbidden",
+                "error_type": "WRONG_USER_TYPE",
                 "message": "هذا الحساب ليس حساب أكاديمية",
                 "path": "/api/v1/academy/",
                 "timestamp": datetime.utcnow().isoformat()
@@ -169,7 +169,7 @@ async def get_current_academy_user(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
                 "status": 404,
-                "error": "Not Found",
+                "error_type": "ACADEMY_NOT_FOUND",
                 "message": "لم يتم العثور على معلومات الأكاديمية",
                 "path": "/api/v1/academy/",
                 "timestamp": datetime.utcnow().isoformat()
@@ -192,7 +192,7 @@ async def get_current_student(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
                 "status": 403,
-                "error": "Forbidden",
+                "error_type": "WRONG_USER_TYPE",
                 "message": "هذا الحساب ليس حساب طالب",
                 "path": "/api/v1/student/",
                 "timestamp": datetime.utcnow().isoformat()
@@ -205,7 +205,7 @@ async def get_current_student(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
                 "status": 404,
-                "error": "Not Found",
+                "error_type": "STUDENT_PROFILE_NOT_FOUND",
                 "message": "لم يتم العثور على ملف الطالب",
                 "path": "/api/v1/student/",
                 "timestamp": datetime.utcnow().isoformat()
@@ -228,6 +228,28 @@ async def get_optional_current_user(
         
     try:
         return await get_current_user(credentials, db)
+    except HTTPException:
+        return None
+
+
+async def get_current_academy_user_optional(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(optional_security_scheme),
+    db: Session = Depends(get_db)
+) -> Optional[User]:
+    """
+    Get current academy user if token is provided, otherwise return None.
+    Only returns academy users, not students or admins.
+    Used for endpoints that work for both teachers and students.
+    """
+    if not credentials:
+        return None
+        
+    try:
+        user = await get_current_user(credentials, db)
+        # Only return academy users
+        if user.user_type in ["academy", "admin"]:
+            return user
+        return None
     except HTTPException:
         return None
 

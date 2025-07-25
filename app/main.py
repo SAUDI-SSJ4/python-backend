@@ -338,8 +338,44 @@ app.add_middleware(
     max_age=86400,  # Cache preflight requests for 24 hours
 )
 
+# Add handler for 401 Unauthorized errors specifically
+@app.exception_handler(401)
+async def unauthorized_handler(request: Request, exc):
+    # Handle authentication errors specifically
+    if isinstance(exc.detail, dict):
+        # If detail is already formatted, use it
+        error_content = exc.detail.copy()
+        error_content["status"] = "error"
+        error_content["status_code"] = 401
+        error_content.setdefault("path", str(request.url.path))
+        error_content.setdefault("timestamp", datetime.utcnow().isoformat())
+        return JSONResponse(status_code=401, content=error_content)
+    
+    # Default unauthorized response
+    return SayanErrorResponse(
+        message="غير مصرح بالوصول - يرجى تسجيل الدخول مرة أخرى",
+        error_type="UNAUTHORIZED",
+        status_code=401
+    )
+
+
+# Add handler for 404 Not Found errors specifically
+@app.exception_handler(404)
+async def not_found_handler(request: Request, exc):
+    # Override default 404 response
+    return SayanErrorResponse(
+        message="الرابط المطلوب غير موجود",
+        error_type="NOT_FOUND_ERROR",
+        status_code=404
+    )
+
+
 @app.exception_handler(HTTPException)
 async def custom_http_exception_handler(request: Request, exc: HTTPException):
+    # Skip if it's 401 or 404 as they have specific handlers
+    if exc.status_code in [401, 404]:
+        raise exc
+    
     # If detail is already a dict with our unified format, use it
     if isinstance(exc.detail, dict):
         error_content = exc.detail.copy()
@@ -370,17 +406,6 @@ async def custom_http_exception_handler(request: Request, exc: HTTPException):
     )
 
     return JSONResponse(status_code=exc.status_code, content=error_response)
-
-
-# Add handler for 404 Not Found errors specifically
-@app.exception_handler(404)
-async def not_found_handler(request: Request, exc):
-    # Override default 404 response
-    return SayanErrorResponse(
-        message="الرابط المطلوب غير موجود",
-        error_type="NOT_FOUND_ERROR",
-        status_code=404
-    )
 
 
 # Add general exception handler for any other status codes
@@ -521,7 +546,7 @@ if students_available:
 if lessons_available:
     app.include_router(
         lessons_router,
-        prefix="/api/v1/lessons",
+        prefix="/api/v1",
         tags=["Lessons Management"]
     )
     print("Lessons router registered successfully")
